@@ -7,6 +7,7 @@ use crate::io;
 use crate::os::raw;
 use crate::sys;
 use crate::sys_common::{AsInner, FromInner, IntoInner};
+use libesp as libc;
 
 /// Raw file descriptors.
 #[stable(feature = "rust1", since = "1.0.0")]

@@ -1,6 +1,8 @@
 // Original implementation taken from rust-memchr.
 // Copyright 2015 Andrew Gallant, bluss and Nicolas Koch
 
+use libesp as libc;
+
 pub fn memchr(needle: u8, haystack: &[u8]) -> Option<usize> {
     let p = unsafe {
         libc::memchr(

@@ -1,6 +1,8 @@
 use crate::cell::UnsafeCell;
 use crate::mem::MaybeUninit;
 
+use libesp as libc;
+
 pub struct Mutex {
     inner: UnsafeCell<libc::pthread_mutex_t>,
 }

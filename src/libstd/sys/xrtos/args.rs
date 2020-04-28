@@ -2,12 +2,14 @@
 //!
 //! On some platforms these are stored during runtime startup,
 //! and on some they are retrieved from the system on demand.
+//! NOTE: unimpl all of this since freertos doesnt support this
 
 #![allow(dead_code)] // runtime init functions not used during testing
 
 use crate::ffi::OsString;
 use crate::marker::PhantomData;
 use crate::vec;
+use libesp as libc;
 
 /// One-time global initialization.
 pub unsafe fn init(argc: isize, argv: *const *const u8) {

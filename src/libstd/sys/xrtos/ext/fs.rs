@@ -8,6 +8,7 @@ use crate::path::Path;
 use crate::sys;
 use crate::sys::platform::fs::MetadataExt as UnixMetadataExt;
 use crate::sys_common::{AsInner, AsInnerMut, FromInner};
+use libesp as libc;
 
 /// Unix-specific extensions to [`File`].
 ///

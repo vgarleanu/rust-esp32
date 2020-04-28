@@ -21,7 +21,8 @@ use crate::sys::fd;
 use crate::sys_common::mutex::{Mutex, MutexGuard};
 use crate::vec;
 
-use libc::{c_char, c_int, c_void};
+// NOTE: We aliasing libc to libesp
+use libesp::{self as libc, c_char, c_int, c_void};
 
 const TMPBUF_SZ: usize = 128;
 

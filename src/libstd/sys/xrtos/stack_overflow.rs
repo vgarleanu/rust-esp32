@@ -1,6 +1,7 @@
 #![cfg_attr(test, allow(dead_code))]
 
 use self::imp::{drop_handler, make_handler};
+use libesp as libc;
 
 pub use self::imp::cleanup;
 pub use self::imp::init;

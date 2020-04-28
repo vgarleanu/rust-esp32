@@ -1,7 +1,7 @@
 use crate::marker::PhantomData;
 use crate::slice;
 
-use libc::{c_void, iovec};
+use libesp::{c_void, iovec};
 
 #[derive(Copy, Clone)]
 #[repr(transparent)]

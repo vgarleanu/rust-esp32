@@ -2,6 +2,8 @@ use crate::io::{self, IoSlice, IoSliceMut};
 use crate::mem::ManuallyDrop;
 use crate::sys::fd::FileDesc;
 
+use libesp as libc;
+
 pub struct Stdin(());
 pub struct Stdout(());
 pub struct Stderr(());

@@ -7,7 +7,9 @@ use crate::sync::atomic::{AtomicBool, Ordering};
 use crate::sys::cvt;
 use crate::sys_common::AsInner;
 
-use libc::{c_int, c_void, ssize_t};
+use libesp::{c_int, c_void, ssize_t};
+// NOTE: We are aliasing libesp to libc to make shit easier
+use libesp as libc;
 
 #[derive(Debug)]
 pub struct FileDesc {

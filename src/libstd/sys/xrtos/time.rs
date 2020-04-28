@@ -6,6 +6,8 @@ use core::hash::{Hash, Hasher};
 pub use self::inner::{Instant, SystemTime, UNIX_EPOCH};
 use crate::convert::TryInto;
 
+use libesp as libc;
+
 const NSEC_PER_SEC: u64 = 1_000_000_000;
 
 #[derive(Copy, Clone)]

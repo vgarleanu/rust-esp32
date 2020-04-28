@@ -1,6 +1,7 @@
 #![allow(dead_code)] // not used on all platforms
 
 use crate::mem;
+use libesp as libc;
 
 pub type Key = libc::pthread_key_t;
 

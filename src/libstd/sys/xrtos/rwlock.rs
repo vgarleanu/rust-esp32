@@ -1,6 +1,8 @@
 use crate::cell::UnsafeCell;
 use crate::sync::atomic::{AtomicUsize, Ordering};
 
+use libesp as libc;
+
 pub struct RWLock {
     inner: UnsafeCell<libc::pthread_rwlock_t>,
     write_locked: UnsafeCell<bool>, // guarded by the `inner` RwLock

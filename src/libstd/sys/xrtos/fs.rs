@@ -12,7 +12,7 @@ use crate::sys::time::SystemTime;
 use crate::sys::{cvt, cvt_r};
 use crate::sys_common::{AsInner, FromInner};
 
-use libc::{c_int, mode_t};
+use libesp::{self as libc, c_int, mode_t};
 
 #[cfg(any(target_os = "linux", target_os = "emscripten", target_os = "android"))]
 use libc::dirfd;

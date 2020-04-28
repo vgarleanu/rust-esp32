@@ -1,6 +1,8 @@
 use crate::mem;
 use crate::slice;
 
+use libesp as libc;
+
 pub fn hashmap_random_keys() -> (u64, u64) {
     let mut v = (0, 0);
     unsafe {

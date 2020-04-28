@@ -4,7 +4,7 @@ use crate::sync::atomic::{AtomicBool, Ordering};
 use crate::sys::fd::FileDesc;
 use crate::sys::{cvt, cvt_r};
 
-use libc::c_int;
+use libesp::{self as libc, c_int};
 
 ////////////////////////////////////////////////////////////////////////////////
 // Anonymous pipes

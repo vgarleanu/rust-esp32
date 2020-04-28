@@ -1,20 +1,5 @@
 #![stable(feature = "unix_socket", since = "1.10.0")]
 
-//! Unix-specific networking functionality
-
-#[cfg(unix)]
-use libc;
-
-// FIXME(#43348): Make libc adapt #[doc(cfg(...))] so we don't need these fake definitions here?
-#[cfg(not(unix))]
-mod libc {
-    pub use libc::c_int;
-    pub type socklen_t = u32;
-    pub struct sockaddr;
-    #[derive(Clone)]
-    pub struct sockaddr_un;
-}
-
 use crate::ascii;
 use crate::ffi::OsStr;
 use crate::fmt;
@@ -28,27 +13,9 @@ use crate::sys::net::Socket;
 use crate::sys::{self, cvt};
 use crate::sys_common::{self, AsInner, FromInner, IntoInner};
 use crate::time::Duration;
+use libesp as libc;
 
-#[cfg(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "dragonfly",
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd",
-    target_os = "haiku"
-))]
 use libc::MSG_NOSIGNAL;
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "dragonfly",
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd",
-    target_os = "haiku"
-)))]
-const MSG_NOSIGNAL: libc::c_int = 0x0;
 
 fn sun_path_offset(addr: &libc::sockaddr_un) -> usize {
     // Work with an actual instance of the type since using a null pointer is UB
@@ -310,12 +277,14 @@ impl UnixStream {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn connect<P: AsRef<Path>>(path: P) -> io::Result<UnixStream> {
+        // NOTE: While esp-idf offers definitions for some parts of UNIX sockets im not sure if
+        // lwip supports them.
         fn inner(path: &Path) -> io::Result<UnixStream> {
             unsafe {
                 let inner = Socket::new_raw(libc::AF_UNIX, libc::SOCK_STREAM)?;
                 let (addr, len) = sockaddr_un(path)?;
 
-                cvt(libc::connect(*inner.as_inner(), &addr as *const _ as *const _, len))?;
+                cvt(libc::lwip_connect(*inner.as_inner(), &addr as *const _ as *const _, len))?;
                 Ok(UnixStream(inner))
             }
         }
@@ -373,7 +342,7 @@ impl UnixStream {
     /// # Examples
     ///
     /// ```no_run
-    /// use std::os::unix::net::UnixStream;
+    /// use std::os::xrtos::net::UnixStream;
     ///
     /// fn main() -> std::io::Result<()> {
     ///     let socket = UnixStream::connect("/tmp/sock")?;
@@ -383,7 +352,9 @@ impl UnixStream {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        SocketAddr::new(|addr, len| unsafe { libc::getsockname(*self.0.as_inner(), addr, len) })
+        SocketAddr::new(|addr, len| unsafe {
+            libc::lwip_getsockname(*self.0.as_inner(), addr, len)
+        })
     }
 
     /// Returns the socket address of the remote half of this connection.
@@ -391,7 +362,7 @@ impl UnixStream {
     /// # Examples
     ///
     /// ```no_run
-    /// use std::os::unix::net::UnixStream;
+    /// use std::os::xrtos::net::UnixStream;
     ///
     /// fn main() -> std::io::Result<()> {
     ///     let socket = UnixStream::connect("/tmp/sock")?;
@@ -401,7 +372,9 @@ impl UnixStream {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
-        SocketAddr::new(|addr, len| unsafe { libc::getpeername(*self.0.as_inner(), addr, len) })
+        SocketAddr::new(|addr, len| unsafe {
+            libc::lwip_getpeername(*self.0.as_inner(), addr, len)
+        })
     }
 
     /// Sets the read timeout for the socket.
@@ -819,8 +792,8 @@ impl UnixListener {
                 let inner = Socket::new_raw(libc::AF_UNIX, libc::SOCK_STREAM)?;
                 let (addr, len) = sockaddr_un(path)?;
 
-                cvt(libc::bind(*inner.as_inner(), &addr as *const _ as *const _, len as _))?;
-                cvt(libc::listen(*inner.as_inner(), 128))?;
+                cvt(libc::lwip_bind(*inner.as_inner(), &addr as *const _ as *const _, len as _))?;
+                cvt(libc::lwip_listen(*inner.as_inner(), 128))?;
 
                 Ok(UnixListener(inner))
             }
@@ -897,7 +870,9 @@ impl UnixListener {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        SocketAddr::new(|addr, len| unsafe { libc::getsockname(*self.0.as_inner(), addr, len) })
+        SocketAddr::new(|addr, len| unsafe {
+            libc::lwip_getsockname(*self.0.as_inner(), addr, len)
+        })
     }
 
     /// Moves the socket into or out of nonblocking mode.
@@ -1259,7 +1234,9 @@ impl UnixDatagram {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        SocketAddr::new(|addr, len| unsafe { libc::getsockname(*self.0.as_inner(), addr, len) })
+        SocketAddr::new(|addr, len| unsafe {
+            libc::lwip_getsockname(*self.0.as_inner(), addr, len)
+        })
     }
 
     /// Returns the address of this socket's peer.
@@ -1283,7 +1260,9 @@ impl UnixDatagram {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
-        SocketAddr::new(|addr, len| unsafe { libc::getpeername(*self.0.as_inner(), addr, len) })
+        SocketAddr::new(|addr, len| unsafe {
+            libc::lwip_getpeername(*self.0.as_inner(), addr, len)
+        })
     }
 
     /// Receives data from the socket.
@@ -1308,7 +1287,7 @@ impl UnixDatagram {
     pub fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
         let mut count = 0;
         let addr = SocketAddr::new(|addr, len| unsafe {
-            count = libc::recvfrom(
+            count = libc::lwip_recvfrom(
                 *self.0.as_inner(),
                 buf.as_mut_ptr() as *mut _,
                 buf.len(),
@@ -1370,7 +1349,7 @@ impl UnixDatagram {
             unsafe {
                 let (addr, len) = sockaddr_un(path)?;
 
-                let count = cvt(libc::sendto(
+                let count = cvt(libc::lwip_sendto(
                     *d.0.as_inner(),
                     buf.as_ptr() as *const _,
                     buf.len(),

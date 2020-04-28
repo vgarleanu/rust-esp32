@@ -21,6 +21,8 @@ use crate::marker;
 use crate::mem;
 use crate::sync::atomic::{AtomicUsize, Ordering};
 
+use libesp as libc;
+
 macro_rules! weak {
     (fn $name:ident($($t:ty),*) -> $ret:ty) => (
         static $name: crate::sys::weak::Weak<unsafe extern fn($($t),*) -> $ret> =

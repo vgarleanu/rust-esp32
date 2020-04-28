@@ -9,12 +9,12 @@ use crate::sys_common::net::{getsockopt, setsockopt, sockaddr_to_addr};
 use crate::sys_common::{AsInner, FromInner, IntoInner};
 use crate::time::{Duration, Instant};
 
-use libc::{c_int, c_void, size_t, sockaddr, socklen_t, EAI_SYSTEM, MSG_PEEK};
+use libesp::{self as libc, c_int, c_void, size_t, sockaddr, socklen_t, EAI_SYSTEM, MSG_PEEK};
 
 pub use crate::sys::{cvt, cvt_r};
 
 #[allow(unused_extern_crates)]
-pub extern crate libc as netc;
+pub extern crate libesp as netc;
 
 pub type wrlen_t = size_t;
 
@@ -27,19 +27,13 @@ pub fn cvt_gai(err: c_int) -> io::Result<()> {
         return Ok(());
     }
 
-    // We may need to trigger a glibc workaround. See on_resolver_failure() for details.
-    on_resolver_failure();
-
     if err == EAI_SYSTEM {
         return Err(io::Error::last_os_error());
     }
 
-    let detail = unsafe {
-        str::from_utf8(CStr::from_ptr(libc::gai_strerror(err)).to_bytes()).unwrap().to_owned()
-    };
     Err(io::Error::new(
         io::ErrorKind::Other,
-        &format!("failed to lookup address information: {}", detail)[..],
+        &format!("failed to lookup address information: {}", err),
     ))
 }
 
@@ -54,70 +48,33 @@ impl Socket {
 
     pub fn new_raw(fam: c_int, ty: c_int) -> io::Result<Socket> {
         unsafe {
-            // On linux we first attempt to pass the SOCK_CLOEXEC flag to
-            // atomically create the socket and set it as CLOEXEC. Support for
-            // this option, however, was added in 2.6.27, and we still support
-            // 2.6.18 as a kernel, so if the returned error is EINVAL we
-            // fallthrough to the fallback.
-            #[cfg(target_os = "linux")]
-            {
-                match cvt(libc::socket(fam, ty | libc::SOCK_CLOEXEC, 0)) {
-                    Ok(fd) => return Ok(Socket(FileDesc::new(fd))),
-                    Err(ref e) if e.raw_os_error() == Some(libc::EINVAL) => {}
-                    Err(e) => return Err(e),
-                }
-            }
-
-            let fd = cvt(libc::socket(fam, ty, 0))?;
+            let fd = cvt(libc::lwip_socket(fam, ty, 0))?;
             let fd = FileDesc::new(fd);
             fd.set_cloexec()?;
-            let socket = Socket(fd);
 
-            // macOS and iOS use `SO_NOSIGPIPE` as a `setsockopt`
-            // flag to disable `SIGPIPE` emission on socket.
-            #[cfg(target_vendor = "apple")]
-            setsockopt(&socket, libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1)?;
-
-            Ok(socket)
+            Ok(Socket(fd))
         }
     }
 
     pub fn new_pair(fam: c_int, ty: c_int) -> io::Result<(Socket, Socket)> {
-        unsafe {
-            let mut fds = [0, 0];
-
-            // Like above, see if we can set cloexec atomically
-            #[cfg(target_os = "linux")]
-            {
-                match cvt(libc::socketpair(fam, ty | libc::SOCK_CLOEXEC, 0, fds.as_mut_ptr())) {
-                    Ok(_) => {
-                        return Ok((Socket(FileDesc::new(fds[0])), Socket(FileDesc::new(fds[1]))));
-                    }
-                    Err(ref e) if e.raw_os_error() == Some(libc::EINVAL) => {}
-                    Err(e) => return Err(e),
-                }
-            }
-
-            cvt(libc::socketpair(fam, ty, 0, fds.as_mut_ptr()))?;
-            let a = FileDesc::new(fds[0]);
-            let b = FileDesc::new(fds[1]);
-            a.set_cloexec()?;
-            b.set_cloexec()?;
-            Ok((Socket(a), Socket(b)))
-        }
+        // NOTE: Does it matter if we simulate socketpair? freertos doesnt have support for
+        // socketpair. For now this is unimplemented
+        // @val
+        unimplemented!("socketpair isnt available on freertos yet?");
     }
 
     pub fn connect_timeout(&self, addr: &SocketAddr, timeout: Duration) -> io::Result<()> {
         self.set_nonblocking(true)?;
         let r = unsafe {
             let (addrp, len) = addr.into_inner();
-            cvt(libc::connect(self.0.raw(), addrp, len))
+            cvt(libc::lwip_connect(self.0.raw(), addrp, len))
         };
         self.set_nonblocking(false)?;
 
         match r {
             Ok(_) => return Ok(()),
             // there's no ErrorKind for EINPROGRESS :(
+            // TODO: @val easy fix here
             Err(ref e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {}
             Err(e) => return Err(e),
         }
@@ -150,7 +107,7 @@ impl Socket {
 
             let timeout = cmp::min(timeout, c_int::max_value() as u64) as c_int;
 
-            match unsafe { libc::poll(&mut pollfd, 1, timeout) } {
+            match unsafe { libc::lwip_poll(&mut pollfd, 1, timeout) } {
                 -1 => {
                     let err = io::Error::last_os_error();
                     if err.kind() != io::ErrorKind::Interrupted {
@@ -175,29 +132,8 @@ impl Socket {
     }
 
     pub fn accept(&self, storage: *mut sockaddr, len: *mut socklen_t) -> io::Result<Socket> {
-        // Unfortunately the only known way right now to accept a socket and
-        // atomically set the CLOEXEC flag is to use the `accept4` syscall on
-        // Linux. This was added in 2.6.28, however, and because we support
-        // 2.6.18 we must detect this support dynamically.
-        #[cfg(target_os = "linux")]
-        {
-            syscall! {
-                fn accept4(
-                    fd: c_int,
-                    addr: *mut sockaddr,
-                    addr_len: *mut socklen_t,
-                    flags: c_int
-                ) -> c_int
-            }
-            let res = cvt_r(|| unsafe { accept4(self.0.raw(), storage, len, libc::SOCK_CLOEXEC) });
-            match res {
-                Ok(fd) => return Ok(Socket(FileDesc::new(fd))),
-                Err(ref e) if e.raw_os_error() == Some(libc::ENOSYS) => {}
-                Err(e) => return Err(e),
-            }
-        }
-
-        let fd = cvt_r(|| unsafe { libc::accept(self.0.raw(), storage, len) })?;
+        // FIXME: @val figure out if we can use CLOEXEC here
+        let fd = cvt_r(|| unsafe { libc::lwip_accept(self.0.raw(), storage, len) })?;
         let fd = FileDesc::new(fd);
         fd.set_cloexec()?;
         Ok(Socket(fd))
@@ -209,7 +145,7 @@ impl Socket {
 
     fn recv_with_flags(&self, buf: &mut [u8], flags: c_int) -> io::Result<usize> {
         let ret = cvt(unsafe {
-            libc::recv(self.0.raw(), buf.as_mut_ptr() as *mut c_void, buf.len(), flags)
+            libc::lwip_recv(self.0.raw(), buf.as_mut_ptr() as *mut c_void, buf.len(), flags)
         })?;
         Ok(ret as usize)
     }
@@ -235,7 +171,7 @@ impl Socket {
         let mut addrlen = mem::size_of_val(&storage) as libc::socklen_t;
 
         let n = cvt(unsafe {
-            libc::recvfrom(
+            libc::lwip_recvfrom(
                 self.0.raw(),
                 buf.as_mut_ptr() as *mut c_void,
                 buf.len(),
@@ -309,7 +245,7 @@ impl Socket {
             Shutdown::Read => libc::SHUT_RD,
             Shutdown::Both => libc::SHUT_RDWR,
         };
-        cvt(unsafe { libc::shutdown(self.0.raw(), how) })?;
+        cvt(unsafe { libc::lwip_shutdown(self.0.raw(), how) })?;
         Ok(())
     }
 
@@ -324,7 +260,8 @@ impl Socket {
 
     pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
         let mut nonblocking = nonblocking as libc::c_int;
-        cvt(unsafe { libc::ioctl(*self.as_inner(), libc::FIONBIO, &mut nonblocking) }).map(drop)
+        cvt(unsafe { libc::lwip_ioctl(*self.as_inner(), libc::FIONBIO, &mut nonblocking) })
+            .map(drop)
     }
 
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
@@ -350,34 +287,3 @@ impl IntoInner<c_int> for Socket {
         self.0.into_raw()
     }
 }
-
-// In versions of glibc prior to 2.26, there's a bug where the DNS resolver
-// will cache the contents of /etc/resolv.conf, so changes to that file on disk
-// can be ignored by a long-running program. That can break DNS lookups on e.g.
-// laptops where the network comes and goes. See
-// https://sourceware.org/bugzilla/show_bug.cgi?id=984. Note however that some
-// distros including Debian have patched glibc to fix this for a long time.
-//
-// A workaround for this bug is to call the res_init libc function, to clear
-// the cached configs. Unfortunately, while we believe glibc's implementation
-// of res_init is thread-safe, we know that other implementations are not
-// (https://github.com/rust-lang/rust/issues/43592). Code here in libstd could
-// try to synchronize its res_init calls with a Mutex, but that wouldn't
-// protect programs that call into libc in other ways. So instead of calling
-// res_init unconditionally, we call it only when we detect we're linking
-// against glibc version < 2.26. (That is, when we both know its needed and
-// believe it's thread-safe).
-#[cfg(target_env = "gnu")]
-fn on_resolver_failure() {
-    use crate::sys;
-
-    // If the version fails to parse, we treat it the same as "not glibc".
-    if let Some(version) = sys::os::glibc_version() {
-        if version < (2, 26) {
-            unsafe { libc::res_init() };
-        }
-    }
-}
-
-#[cfg(not(target_env = "gnu"))]
-fn on_resolver_failure() {}

@@ -1,6 +1,7 @@
 use crate::cell::UnsafeCell;
 use crate::sys::mutex::{self, Mutex};
 use crate::time::Duration;
+use libesp as libc;
 
 pub struct Condvar {
     inner: UnsafeCell<libc::pthread_cond_t>,
