@@ -39,6 +39,12 @@ pub unsafe extern "C" fn __rust_panic_cleanup(_: *mut u8) -> *mut (dyn Any + Sen
 pub unsafe extern "C" fn __rust_start_panic(_payload: usize) -> u32 {
     abort();
 
+    #[cfg(target_arch = "xtensa")]
+    unsafe fn abort() -> ! {
+        // TODO: Proper abort mechanics
+        loop {}
+    }
+
     #[cfg(any(unix, target_os = "cloudabi"))]
     unsafe fn abort() -> ! {
         libc::abort();
