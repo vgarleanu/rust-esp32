@@ -1105,7 +1105,11 @@ impl UnixDatagram {
                 let socket = UnixDatagram::unbound()?;
                 let (addr, len) = sockaddr_un(path)?;
 
-                cvt(libc::bind(*socket.0.as_inner(), &addr as *const _ as *const _, len as _))?;
+                cvt(libc::lwip_bind(
+                    *socket.0.as_inner(),
+                    &addr as *const _ as *const _,
+                    len as _,
+                ))?;
 
                 Ok(socket)
             }
@@ -1189,7 +1193,7 @@ impl UnixDatagram {
             unsafe {
                 let (addr, len) = sockaddr_un(path)?;
 
-                cvt(libc::connect(*d.0.as_inner(), &addr as *const _ as *const _, len))?;
+                cvt(libc::lwip_connect(*d.0.as_inner(), &addr as *const _ as *const _, len))?;
 
                 Ok(())
             }
