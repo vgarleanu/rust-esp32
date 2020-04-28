@@ -37,6 +37,9 @@ rand = "0.7"
 [target.'cfg(any(all(target_arch = "wasm32", not(target_os = "emscripten")), all(target_vendor = "fortanix", target_env = "sgx")))'.dependencies]
 dlmalloc = { version = "0.1", features = ['rustc-dep-of-std'] }
 
+[target.xtensa-esp32-none-elf.dependencies]
+libesp = { path = "../../../esp-idf-sys/libesp" }
+
 [target.x86_64-fortanix-unknown-sgx.dependencies]
 fortanix-sgx-abi = { version = "0.3.2", features = ['rustc-dep-of-std'] }
 
