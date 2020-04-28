@@ -9,6 +9,7 @@ use crate::net::{self, Shutdown};
 use crate::os::unix::ffi::OsStrExt;
 use crate::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use crate::path::Path;
+use crate::sys::ext::io::*;
 use crate::sys::net::Socket;
 use crate::sys::{self, cvt};
 use crate::sys_common::{self, AsInner, FromInner, IntoInner};
