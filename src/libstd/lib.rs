@@ -333,6 +333,7 @@ extern crate test;
 extern crate alloc as alloc_crate;
 #[doc(masked)]
 #[allow(unused_extern_crates)]
+#[cfg(not(target_arch = "xtensa"))]
 extern crate libc;
 
 // We always need an unwinder currently for backtraces

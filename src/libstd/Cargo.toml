@@ -19,7 +19,6 @@ cfg-if = { version = "0.1.8", features = ['rustc-dep-of-std'] }
 panic_unwind = { path = "../libpanic_unwind", optional = true }
 panic_abort = { path = "../libpanic_abort" }
 core = { path = "../libcore" }
-libc = { version = "0.2.51", default-features = false, features = ['rustc-dep-of-std'] }
 compiler_builtins = { version = "0.1.16" }
 profiler_builtins = { path = "../libprofiler_builtins", optional = true }
 unwind = { path = "../libunwind" }
@@ -34,11 +33,14 @@ features = [ "rustc-dep-of-std" ] # enable build support for integrating into li
 [dev-dependencies]
 rand = "0.7"
 
+[target.'cfg(not(target_arch = "xtensa"))'.dependencies]
+libc = { version = "0.2.51", default-features = false, features = ['rustc-dep-of-std'] }
+
 [target.'cfg(any(all(target_arch = "wasm32", not(target_os = "emscripten")), all(target_vendor = "fortanix", target_env = "sgx")))'.dependencies]
 dlmalloc = { version = "0.1", features = ['rustc-dep-of-std'] }
 
 [target.xtensa-esp32-none-elf.dependencies]
-libesp = { path = "../../../esp-idf-sys/libesp" }
+libesp = { path = "../../../esp-idf-sys/esp" }
 
 [target.x86_64-fortanix-unknown-sgx.dependencies]
 fortanix-sgx-abi = { version = "0.3.2", features = ['rustc-dep-of-std'] }

@@ -47,7 +47,7 @@ cfg_if::cfg_if! {
     } else if #[cfg(all(target_vendor = "fortanix", target_env = "sgx"))] {
         mod sgx;
         pub use self::sgx::*;
-    } else if #[cfg(all(target_arch = "xtensa", target_os = "xrtos"))] {
+    } else if #[cfg(target_arch = "xtensa")] {
         mod xrtos;
         pub use self::xrtos::*;
     } else {
