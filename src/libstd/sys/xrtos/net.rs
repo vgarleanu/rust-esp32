@@ -259,8 +259,9 @@ impl Socket {
     }
 
     pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
+        // NOTE: FIONBIO isnt available with lwip so we are gonna use fcntl instead
         let mut nonblocking = nonblocking as libc::c_int;
-        cvt(unsafe { libc::lwip_ioctl(*self.as_inner(), libc::FIONBIO, &mut nonblocking) })
+        cvt(unsafe { libc::lwip_fcntl(*self.as_inner(), libc::F_SETFL, libc::O_NONBLOCK) })
             .map(drop)
     }
 
