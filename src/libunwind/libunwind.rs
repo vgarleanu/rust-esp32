@@ -1,6 +1,27 @@
 #![allow(nonstandard_style)]
 
+#[cfg(not(target_arch = "xtensa"))]
 use libc::{c_int, c_void, uintptr_t};
+
+#[cfg(target_arch = "xtensa")]
+pub mod raw {
+    pub enum c_void {}
+    pub type c_uchar = u8;
+    pub type c_schar = i8;
+    pub type c_char = i8;
+    pub type c_short = i16;
+    pub type c_ushort = u16;
+    pub type c_int = i32;
+    pub type c_uint = u32;
+    pub type c_long = i32;
+    pub type c_ulong = u32;
+    pub type c_longlong = i64;
+    pub type c_ulonglong = u64;
+    pub type c_uintptr_t = c_uint;
+}
+
+#[cfg(target_arch = "xtensa")]
+use self::raw::{c_int, c_uintptr_t as uintptr_t, c_void};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -62,6 +83,10 @@ pub const unwinder_private_data_size: usize = 20;
 
 #[cfg(all(target_arch = "hexagon", target_os = "linux"))]
 pub const unwinder_private_data_size: usize = 35;
+
+// TODO: @Valerian Check if this is accurate
+#[cfg(target_arch = "xtensa")]
+pub const unwinder_private_data_size: usize = 2;
 
 #[repr(C)]
 pub struct _Unwind_Exception {
