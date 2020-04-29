@@ -166,6 +166,7 @@ pub use self::mutex::{Mutex, MutexGuard};
 #[allow(deprecated)]
 pub use self::once::{Once, OnceState, ONCE_INIT};
 #[stable(feature = "rust1", since = "1.0.0")]
+#[cfg(not(target_arch = "xtensa"))]
 pub use self::rwlock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use crate::sys_common::poison::{LockResult, PoisonError, TryLockError, TryLockResult};
@@ -176,4 +177,5 @@ mod barrier;
 mod condvar;
 mod mutex;
 mod once;
+#[cfg(not(target_arch = "xtensa"))]
 mod rwlock;
