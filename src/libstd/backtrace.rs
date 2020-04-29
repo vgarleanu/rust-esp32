@@ -224,7 +224,7 @@ impl fmt::Debug for BytesOrWide {
                 BytesOrWide::Wide(w) => BytesOrWideString::Wide(w),
             },
             backtrace::PrintFmt::Short,
-            crate::env::current_dir().as_ref().ok(),
+            None,
         )
     }
 }
@@ -242,6 +242,7 @@ impl Backtrace {
             1 => return false,
             _ => return true,
         }
+        /* TODO: Figure out something to rpelace env, maybe compile time hardocded vals?
         let enabled = match env::var("RUST_LIB_BACKTRACE") {
             Ok(s) => s != "0",
             Err(_) => match env::var("RUST_BACKTRACE") {
@@ -249,6 +250,8 @@ impl Backtrace {
                 Err(_) => false,
             },
         };
+        */
+        let enabled = true;
         ENABLED.store(enabled as usize + 1, SeqCst);
         enabled
     }
@@ -359,9 +362,8 @@ impl fmt::Display for Backtrace {
         // we just print the path as-is. Note that we also only do this for the
         // short format, because if it's full we presumably want to print
         // everything.
-        let cwd = crate::env::current_dir();
         let mut print_path = move |fmt: &mut fmt::Formatter<'_>, path: BytesOrWideString<'_>| {
-            output_filename(fmt, path, style, cwd.as_ref().ok())
+            output_filename(fmt, path, style, None)
         };
 
         let mut f = backtrace::BacktraceFmt::new(fmt, style, &mut print_path);

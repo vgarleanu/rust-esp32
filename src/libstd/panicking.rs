@@ -13,10 +13,14 @@ use crate::any::Any;
 use crate::fmt;
 use crate::intrinsics;
 use crate::mem::{self, ManuallyDrop};
+#[cfg(not(target_arch = "xtensa"))]
 use crate::process;
 use crate::sync::atomic::{AtomicBool, Ordering};
 use crate::sys::stdio::panic_output;
 use crate::sys_common::backtrace::{self, RustBacktrace};
+#[cfg(target_arch = "xtensa")]
+use crate::sys_common::mutex::Mutex;
+#[cfg(not(target_arch = "xtensa"))]
 use crate::sys_common::rwlock::RWLock;
 use crate::sys_common::{thread_info, util};
 use crate::thread;
@@ -64,6 +68,11 @@ enum Hook {
     Custom(*mut (dyn Fn(&PanicInfo<'_>) + 'static + Sync + Send)),
 }
 
+// FIXME: Since xtensa doesnt support pthread rwlock we are gonna use mutexes temporarily
+#[cfg(target_arch = "xtensa")]
+static HOOK_LOCK: Mutex = Mutex::new();
+
+#[cfg(not(target_arch = "xtensa"))]
 static HOOK_LOCK: RWLock = RWLock::new();
 static mut HOOK: Hook = Hook::Default;
 
@@ -100,6 +109,7 @@ static mut HOOK: Hook = Hook::Default;
 ///
 /// panic!("Normal panic");
 /// ```
+#[cfg(not(target_arch = "xtensa"))]
 #[stable(feature = "panic_hooks", since = "1.10.0")]
 pub fn set_hook(hook: Box<dyn Fn(&PanicInfo<'_>) + 'static + Sync + Send>) {
     if thread::panicking() {
@@ -111,6 +121,27 @@ pub fn set_hook(hook: Box<dyn Fn(&PanicInfo<'_>) + 'static + Sync + Send>) {
         let old_hook = HOOK;
         HOOK = Hook::Custom(Box::into_raw(hook));
         HOOK_LOCK.write_unlock();
+
+        if let Hook::Custom(ptr) = old_hook {
+            #[allow(unused_must_use)]
+            {
+                Box::from_raw(ptr);
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "xtensa")]
+#[stable(feature = "panic_hooks", since = "1.10.0")]
+pub fn set_hook(hook: Box<dyn Fn(&PanicInfo<'_>) + 'static + Sync + Send>) {
+    if thread::panicking() {
+        panic!("cannot modify the panic hook from a panicking thread");
+    }
+
+    unsafe {
+        HOOK_LOCK.lock();
+        let old_hook = HOOK;
+        HOOK = Hook::Custom(Box::into_raw(hook));
 
         if let Hook::Custom(ptr) = old_hook {
             #[allow(unused_must_use)]
@@ -148,6 +179,7 @@ pub fn set_hook(hook: Box<dyn Fn(&PanicInfo<'_>) + 'static + Sync + Send>) {
 ///
 /// panic!("Normal panic");
 /// ```
+#[cfg(not(target_arch = "xtensa"))]
 #[stable(feature = "panic_hooks", since = "1.10.0")]
 pub fn take_hook() -> Box<dyn Fn(&PanicInfo<'_>) + 'static + Sync + Send> {
     if thread::panicking() {
@@ -159,6 +191,25 @@ pub fn take_hook() -> Box<dyn Fn(&PanicInfo<'_>) + 'static + Sync + Send> {
         let hook = HOOK;
         HOOK = Hook::Default;
         HOOK_LOCK.write_unlock();
+
+        match hook {
+            Hook::Default => Box::new(default_hook),
+            Hook::Custom(ptr) => Box::from_raw(ptr),
+        }
+    }
+}
+
+#[cfg(target_arch = "xtensa")]
+#[stable(feature = "panic_hooks", since = "1.10.0")]
+pub fn take_hook() -> Box<dyn Fn(&PanicInfo<'_>) + 'static + Sync + Send> {
+    if thread::panicking() {
+        panic!("cannot modify the panic hook from a panicking thread");
+    }
+
+    unsafe {
+        HOOK_LOCK.lock();
+        let hook = HOOK;
+        HOOK = Hook::Default;
 
         match hook {
             Hook::Default => Box::new(default_hook),
@@ -447,6 +498,7 @@ pub fn begin_panic<M: Any + Send>(msg: M) -> ! {
         }
     }
 
+    // TODO: Replace loop with process::abort
     unsafe impl<A: Send + 'static> BoxMeUp for PanicPayload<A> {
         fn take_box(&mut self) -> *mut (dyn Any + Send) {
             // Note that this should be the only allocation performed in this code path. Currently
@@ -456,7 +508,7 @@ pub fn begin_panic<M: Any + Send>(msg: M) -> ! {
             // thread that's panicking.
             let data = match self.inner.take() {
                 Some(a) => Box::new(a) as Box<dyn Any + Send>,
-                None => process::abort(),
+                None => loop {},
             };
             Box::into_raw(data)
         }
@@ -464,7 +516,7 @@ pub fn begin_panic<M: Any + Send>(msg: M) -> ! {
         fn get(&mut self) -> &(dyn Any + Send) {
             match self.inner {
                 Some(ref a) => a,
-                None => process::abort(),
+                None => loop {},
             }
         }
     }
@@ -475,6 +527,7 @@ pub fn begin_panic<M: Any + Send>(msg: M) -> ! {
 /// Executes the primary logic for a panic, including checking for recursive
 /// panics, panic hooks, and finally dispatching to the panic runtime to either
 /// abort or unwind.
+#[cfg(not(target_arch = "xtensa"))]
 fn rust_panic_with_hook(
     payload: &mut dyn BoxMeUp,
     message: Option<&fmt::Arguments<'_>>,
@@ -516,6 +569,64 @@ fn rust_panic_with_hook(
             }
         };
         HOOK_LOCK.read_unlock();
+    }
+
+    if panics > 1 {
+        // If a thread panics while it's already unwinding then we
+        // have limited options. Currently our preference is to
+        // just abort. In the future we may consider resuming
+        // unwinding or otherwise exiting the thread cleanly.
+        util::dumb_print(format_args!(
+            "thread panicked while panicking. \
+                                       aborting.\n"
+        ));
+        unsafe { intrinsics::abort() }
+    }
+
+    rust_panic(payload)
+}
+
+#[cfg(target_arch = "xtensa")]
+fn rust_panic_with_hook(
+    payload: &mut dyn BoxMeUp,
+    message: Option<&fmt::Arguments<'_>>,
+    location: &Location<'_>,
+) -> ! {
+    let panics = update_panic_count(1);
+
+    // If this is the third nested call (e.g., panics == 2, this is 0-indexed),
+    // the panic hook probably triggered the last panic, otherwise the
+    // double-panic check would have aborted the process. In this case abort the
+    // process real quickly as we don't want to try calling it again as it'll
+    // probably just panic again.
+    if panics > 2 {
+        util::dumb_print(format_args!(
+            "thread panicked while processing \
+                                       panic. aborting.\n"
+        ));
+        unsafe { intrinsics::abort() }
+    }
+
+    unsafe {
+        let mut info = PanicInfo::internal_constructor(message, location);
+        HOOK_LOCK.lock();
+        match HOOK {
+            // Some platforms (like wasm) know that printing to stderr won't ever actually
+            // print anything, and if that's the case we can skip the default
+            // hook. Since string formatting happens lazily when calling `payload`
+            // methods, this means we avoid formatting the string at all!
+            // (The panic runtime might still call `payload.take_box()` though and trigger
+            // formatting.)
+            Hook::Default if panic_output().is_none() => {}
+            Hook::Default => {
+                info.set_payload(payload.get());
+                default_hook(&info);
+            }
+            Hook::Custom(ptr) => {
+                info.set_payload(payload.get());
+                (*ptr)(&info);
+            }
+        };
     }
 
     if panics > 1 {
