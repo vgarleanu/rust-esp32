@@ -65,7 +65,8 @@ unsafe fn _print(w: &mut dyn Write, format: PrintFmt) -> io::Result<()> {
 unsafe fn _print_fmt(fmt: &mut fmt::Formatter<'_>, print_fmt: PrintFmt) -> fmt::Result {
     // Always 'fail' to get the cwd when running under Miri -
     // this allows Miri to display backtraces in isolation mode
-    let cwd = if !cfg!(miri) { env::current_dir().ok() } else { None };
+    //    let cwd = if !cfg!(miri) { env::current_dir().ok() } else { None };
+    let cwd = None;
 
     let mut print_path = move |fmt: &mut fmt::Formatter<'_>, bows: BytesOrWideString<'_>| {
         output_filename(fmt, bows, print_fmt, cwd.as_ref())
@@ -160,17 +161,7 @@ pub fn rust_backtrace_env() -> RustBacktrace {
         _ => return RustBacktrace::Print(PrintFmt::Full),
     }
 
-    let (format, cache) = env::var_os("RUST_BACKTRACE")
-        .map(|x| {
-            if &x == "0" {
-                (RustBacktrace::RuntimeDisabled, 1)
-            } else if &x == "full" {
-                (RustBacktrace::Print(PrintFmt::Full), 3)
-            } else {
-                (RustBacktrace::Print(PrintFmt::Short), 2)
-            }
-        })
-        .unwrap_or((RustBacktrace::RuntimeDisabled, 1));
+    let (format, cache) = (RustBacktrace::RuntimeDisabled, 1);
     ENABLED.store(cache, Ordering::SeqCst);
     format
 }

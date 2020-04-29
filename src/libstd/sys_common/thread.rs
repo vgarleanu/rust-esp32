@@ -8,7 +8,10 @@ pub fn min_stack() -> usize {
         0 => {}
         n => return n - 1,
     }
-    let amt = env::var("RUST_MIN_STACK").ok().and_then(|s| s.parse().ok());
+    //    let amt = env::var("RUST_MIN_STACK").ok().and_then(|s| s.parse().ok());
+    #[cfg(target_arch = "xtensa")]
+    let amt = 4 * 1024;
+    #[cfg(not(target_arch = "xtensa"))]
     let amt = amt.unwrap_or(imp::DEFAULT_MIN_STACK_SIZE);
 
     // 0 is our sentinel value, so ensure that we'll never see 0 after

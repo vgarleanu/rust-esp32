@@ -57,11 +57,13 @@ pub mod mutex;
           target_os = "cloudabi",
           target_os = "hermit",
           target_arch = "wasm32",
-          all(target_vendor = "fortanix", target_env = "sgx")))]
+          all(target_vendor = "fortanix", target_env = "sgx"), target_arch = "xtensa"))]
 pub mod os_str_bytes;
 pub mod poison;
+#[cfg(not(target_arch = "xtensa"))]
 pub mod process;
 pub mod remutex;
+#[cfg(not(target_arch = "xtensa"))]
 pub mod rwlock;
 pub mod thread;
 pub mod thread_info;
@@ -125,6 +127,7 @@ pub fn at_exit<F: FnOnce() + Send + 'static>(f: F) -> Result<(), ()> {
 pub fn cleanup() {
     static CLEANUP: Once = Once::new();
     CLEANUP.call_once(|| unsafe {
+        #[cfg(not(target_arch = "xtensa"))]
         sys::args::cleanup();
         sys::stack_overflow::cleanup();
         at_exit_imp::cleanup();

@@ -6,12 +6,38 @@ use crate::io::{self, Error, ErrorKind, IoSlice, IoSliceMut};
 use crate::mem;
 use crate::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr};
 use crate::ptr;
-use crate::sys::net::netc as c;
 use crate::sys::net::{cvt, cvt_gai, cvt_r, init, wrlen_t, Socket};
 use crate::sys_common::{AsInner, FromInner, IntoInner};
 use crate::time::Duration;
 
+#[cfg(not(target_arch = "xtensa"))]
 use libc::{c_int, c_void};
+
+#[cfg(target_arch = "xtensa")]
+use libesp::{c_int, c_void};
+
+#[cfg(target_arch = "xtensa")]
+use libesp as libc;
+
+#[cfg(not(target_arch = "xtensa"))]
+use crate::sys::net::netc as c;
+
+#[cfg(target_arch = "xtensa")]
+mod c {
+    pub use libesp::consts::*;
+    pub use libesp::{
+        addrinfo, ip_mreq, ipv6_mreq, sockaddr, sockaddr_in, sockaddr_in6, sockaddr_storage,
+        socklen_t,
+    };
+    pub use libesp::{
+        lwip_accept as accept, lwip_bind as bind, lwip_connect as connect, lwip_fcntl as fcntl,
+        lwip_freeaddrinfo as freeaddrinfo, lwip_getaddrinfo as getaddrinfo,
+        lwip_getpeername as getpeername, lwip_getsockname as getsockname,
+        lwip_getsockopt as getsockopt, lwip_listen as listen, lwip_poll as poll, lwip_recv as recv,
+        lwip_recvfrom as recvfrom, lwip_send as send, lwip_sendto as sendto,
+        lwip_setsockopt as setsockopt, lwip_socket as socket,
+    };
+}
 
 cfg_if::cfg_if! {
     if #[cfg(any(
@@ -21,6 +47,8 @@ cfg_if::cfg_if! {
         target_os = "solaris", target_os = "haiku", target_os = "l4re"))] {
         use crate::sys::net::netc::IPV6_JOIN_GROUP as IPV6_ADD_MEMBERSHIP;
         use crate::sys::net::netc::IPV6_LEAVE_GROUP as IPV6_DROP_MEMBERSHIP;
+    } else if #[cfg(target_arch = "xtensa")] {
+        use crate::sys::net::netc::consts::{IPV6_ADD_MEMBERSHIP, IPV6_DROP_MEMBERSHIP};
     } else {
         use crate::sys::net::netc::IPV6_ADD_MEMBERSHIP;
         use crate::sys::net::netc::IPV6_DROP_MEMBERSHIP;
