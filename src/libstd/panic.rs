@@ -13,7 +13,9 @@ use crate::pin::Pin;
 use crate::ptr::{NonNull, Unique};
 use crate::rc::Rc;
 use crate::sync::atomic;
-use crate::sync::{Arc, Mutex, RwLock};
+#[cfg(not(target_arch = "xtensa"))]
+use crate::sync::RwLock;
+use crate::sync::{Arc, Mutex};
 use crate::task::{Context, Poll};
 use crate::thread::Result;
 
@@ -211,6 +213,7 @@ impl<T: UnwindSafe + ?Sized> UnwindSafe for Unique<T> {}
 impl<T: RefUnwindSafe + ?Sized> UnwindSafe for NonNull<T> {}
 #[stable(feature = "catch_unwind", since = "1.9.0")]
 impl<T: ?Sized> UnwindSafe for Mutex<T> {}
+#[cfg(not(target_arch = "xtensa"))]
 #[stable(feature = "catch_unwind", since = "1.9.0")]
 impl<T: ?Sized> UnwindSafe for RwLock<T> {}
 #[stable(feature = "catch_unwind", since = "1.9.0")]
@@ -235,6 +238,7 @@ impl<T> RefUnwindSafe for AssertUnwindSafe<T> {}
 
 #[stable(feature = "unwind_safe_lock_refs", since = "1.12.0")]
 impl<T: ?Sized> RefUnwindSafe for Mutex<T> {}
+#[cfg(not(target_arch = "xtensa"))]
 #[stable(feature = "unwind_safe_lock_refs", since = "1.12.0")]
 impl<T: ?Sized> RefUnwindSafe for RwLock<T> {}
 
