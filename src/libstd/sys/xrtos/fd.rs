@@ -1,6 +1,7 @@
 #![unstable(reason = "not public", issue = "none", feature = "fd")]
 
 use crate::cmp;
+use crate::convert::TryInto;
 use crate::io::{self, Initializer, IoSlice, IoSliceMut, Read};
 use crate::mem;
 use crate::sync::atomic::{AtomicBool, Ordering};
@@ -50,16 +51,21 @@ impl FileDesc {
 
     pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
         let ret = cvt(unsafe {
-            libc::read(self.fd, buf.as_mut_ptr() as *mut c_void, cmp::min(buf.len(), max_len()))
+            libc::read(
+                self.fd,
+                buf.as_mut_ptr() as *mut c_void,
+                cmp::min(buf.len(), max_len()).try_into().unwrap(),
+            )
         })?;
         Ok(ret as usize)
     }
 
+    // NOTE: May cause UB since the definition of iovec is conflicting with lwip
     pub fn read_vectored(&self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
         let ret = cvt(unsafe {
             libc::readv(
                 self.fd,
-                bufs.as_ptr() as *const libc::iovec,
+                bufs.as_ptr() as *mut libc::iovec,
                 cmp::min(bufs.len(), c_int::max_value() as usize) as c_int,
             )
         })?;
@@ -72,29 +78,22 @@ impl FileDesc {
     }
 
     pub fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-        #[cfg(target_os = "android")]
-        use super::android::cvt_pread64;
-
-        #[cfg(not(target_os = "android"))]
         unsafe fn cvt_pread64(
             fd: c_int,
             buf: *mut c_void,
-            count: usize,
-            offset: i64,
+            count: u32,
+            offset: i32,
         ) -> io::Result<isize> {
-            #[cfg(not(target_os = "linux"))]
             use libc::pread as pread64;
-            #[cfg(target_os = "linux")]
-            use libc::pread64;
-            cvt(pread64(fd, buf, count, offset))
+            cvt(pread64(fd, buf, count, offset) as isize)
         }
 
         unsafe {
             cvt_pread64(
                 self.fd,
                 buf.as_mut_ptr() as *mut c_void,
-                cmp::min(buf.len(), max_len()),
-                offset as i64,
+                cmp::min(buf.len(), max_len()).try_into().unwrap(),
+                offset.try_into().unwrap(),
             )
             .map(|n| n as usize)
         }
@@ -102,7 +101,11 @@ impl FileDesc {
 
     pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
         let ret = cvt(unsafe {
-            libc::write(self.fd, buf.as_ptr() as *const c_void, cmp::min(buf.len(), max_len()))
+            libc::write(
+                self.fd,
+                buf.as_ptr() as *const c_void,
+                cmp::min(buf.len(), max_len()).try_into().unwrap(),
+            )
         })?;
         Ok(ret as usize)
     }
@@ -111,104 +114,52 @@ impl FileDesc {
         let ret = cvt(unsafe {
             libc::writev(
                 self.fd,
-                bufs.as_ptr() as *const libc::iovec,
+                bufs.as_ptr() as *mut libc::iovec,
                 cmp::min(bufs.len(), c_int::max_value() as usize) as c_int,
             )
         })?;
         Ok(ret as usize)
     }
 
+    // FIXME: maybe instead of a try_into unwrap actually just allow i32s to be passed as offsets?
     pub fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
-        #[cfg(target_os = "android")]
-        use super::android::cvt_pwrite64;
-
-        #[cfg(not(target_os = "android"))]
-        unsafe fn cvt_pwrite64(
-            fd: c_int,
-            buf: *const c_void,
-            count: usize,
-            offset: i64,
-        ) -> io::Result<isize> {
-            #[cfg(not(target_os = "linux"))]
-            use libc::pwrite as pwrite64;
-            #[cfg(target_os = "linux")]
-            use libc::pwrite64;
-            cvt(pwrite64(fd, buf, count, offset))
-        }
-
-        unsafe {
-            cvt_pwrite64(
+        Ok(unsafe {
+            libc::pwrite(
                 self.fd,
                 buf.as_ptr() as *const c_void,
-                cmp::min(buf.len(), max_len()),
-                offset as i64,
-            )
-            .map(|n| n as usize)
-        }
+                cmp::min(buf.len(), max_len()).try_into().unwrap(),
+                offset.try_into().unwrap(),
+            ) as usize
+        })
     }
 
-    #[cfg(target_os = "linux")]
     pub fn get_cloexec(&self) -> io::Result<bool> {
-        unsafe { Ok((cvt(libc::fcntl(self.fd, libc::F_GETFD))? & libc::FD_CLOEXEC) != 0) }
-    }
-
-    #[cfg(not(any(
-        target_env = "newlib",
-        target_os = "solaris",
-        target_os = "emscripten",
-        target_os = "fuchsia",
-        target_os = "l4re",
-        target_os = "linux",
-        target_os = "haiku",
-        target_os = "redox"
-    )))]
-    pub fn set_cloexec(&self) -> io::Result<()> {
         unsafe {
-            cvt(libc::ioctl(self.fd, libc::FIOCLEX))?;
-            Ok(())
+            Ok((cvt(libc::fcntl(self.fd, libc::consts::F_GETFD))? & libc::consts::FD_CLOEXEC) != 0)
         }
     }
-    #[cfg(any(
-        target_env = "newlib",
-        target_os = "solaris",
-        target_os = "emscripten",
-        target_os = "fuchsia",
-        target_os = "l4re",
-        target_os = "linux",
-        target_os = "haiku",
-        target_os = "redox"
-    ))]
+
     pub fn set_cloexec(&self) -> io::Result<()> {
         unsafe {
-            let previous = cvt(libc::fcntl(self.fd, libc::F_GETFD))?;
-            let new = previous | libc::FD_CLOEXEC;
+            let previous = cvt(libc::fcntl(self.fd, libc::consts::F_GETFD))?;
+            let new = previous | libc::consts::FD_CLOEXEC;
             if new != previous {
-                cvt(libc::fcntl(self.fd, libc::F_SETFD, new))?;
+                cvt(libc::fcntl(self.fd, libc::consts::F_SETFD, new))?;
             }
             Ok(())
         }
     }
 
-    #[cfg(target_os = "linux")]
     pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
         unsafe {
-            let v = nonblocking as c_int;
-            cvt(libc::ioctl(self.fd, libc::FIONBIO, &v))?;
-            Ok(())
-        }
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
-        unsafe {
-            let previous = cvt(libc::fcntl(self.fd, libc::F_GETFL))?;
+            let previous = cvt(libc::fcntl(self.fd, libc::consts::F_GETFL))?;
             let new = if nonblocking {
-                previous | libc::O_NONBLOCK
+                previous | libc::consts::O_NONBLOCK
             } else {
-                previous & !libc::O_NONBLOCK
+                previous & !libc::consts::O_NONBLOCK
             };
             if new != previous {
-                cvt(libc::fcntl(self.fd, libc::F_SETFL, new))?;
+                cvt(libc::fcntl(self.fd, libc::consts::F_SETFL, new))?;
             }
             Ok(())
         }
@@ -230,10 +181,7 @@ impl FileDesc {
         // resolve so we at least compile this.
         //
         // [1]: http://comments.gmane.org/gmane.linux.lib.musl.general/2963
-        #[cfg(any(target_os = "android", target_os = "haiku"))]
-        use libc::F_DUPFD as F_DUPFD_CLOEXEC;
-        #[cfg(not(any(target_os = "android", target_os = "haiku")))]
-        use libc::F_DUPFD_CLOEXEC;
+        use libc::consts::F_DUPFD as F_DUPFD_CLOEXEC;
 
         let make_filedesc = |fd| {
             let fd = FileDesc::new(fd);
@@ -254,13 +202,13 @@ impl FileDesc {
                         FileDesc::new(fd)
                     });
                 }
-                Err(ref e) if e.raw_os_error() == Some(libc::EINVAL) => {
+                Err(ref e) if e.raw_os_error() == Some(libc::errno::EINVAL) => {
                     TRY_CLOEXEC.store(false, Ordering::Relaxed);
                 }
                 Err(e) => return Err(e),
             }
         }
-        cvt(unsafe { libc::fcntl(fd, libc::F_DUPFD, 0) }).and_then(make_filedesc)
+        cvt(unsafe { libc::fcntl(fd, libc::consts::F_DUPFD, 0) }).and_then(make_filedesc)
     }
 }
 

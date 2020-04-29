@@ -2,19 +2,20 @@
 
 use crate::io::ErrorKind;
 
-pub use crate::os::freertos as platform;
-
 pub use self::rand::hashmap_random_keys;
 pub use libesp::strlen;
+
+pub use crate::os::xrtos as platform;
 
 // Alias libesp to libc for ease of porting
 use libesp as libc;
 
-#[macro_use]
-pub mod weak;
+// FIXME: Disabled for now, do we even need it? considering dlsym isnt even implemented for esp-idf
+// #[macro_use]
+// pub mod weak;
 
 pub mod alloc;
-pub mod args;
+// pub mod args;
 pub mod cmath;
 pub mod condvar;
 pub mod ext;
@@ -28,8 +29,10 @@ pub mod net;
 pub mod os;
 pub mod path;
 pub mod pipe;
+pub mod process;
 pub mod rand;
-pub mod rwlock;
+// FIXME: Diasbled for now awaiting soft implementation because esp-idf doesnt support rwlock
+// pub mod rwlock;
 pub mod stack_overflow;
 pub mod stdio;
 pub mod thread;
@@ -52,7 +55,7 @@ pub fn init() {
 pub use libesp::signal;
 
 pub fn decode_error_kind(errno: i32) -> ErrorKind {
-    match errno as libesp::c_int {
+    match errno as libesp::c_uint {
         libc::ECONNREFUSED => ErrorKind::ConnectionRefused,
         libc::ECONNRESET => ErrorKind::ConnectionReset,
         libc::EPERM | libc::EACCES => ErrorKind::PermissionDenied,
@@ -115,6 +118,10 @@ where
 // understandable error message like "Abort trap" rather than "Illegal
 // instruction" that intrinsics::abort would cause, as intrinsics::abort is
 // implemented as an illegal instruction.
+// However on the esp32 running freertos we dont really care, freertos doesnt do shit in this case
+// so we just loop indefinitely as if we are running on bare metal
 pub unsafe fn abort_internal() -> ! {
-    libc::abort()
+    libc::abort();
+
+    loop {}
 }

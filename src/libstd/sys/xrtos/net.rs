@@ -1,4 +1,5 @@
 use crate::cmp;
+use crate::convert::TryInto;
 use crate::ffi::CStr;
 use crate::io::{self, IoSlice, IoSliceMut};
 use crate::mem;
@@ -9,12 +10,11 @@ use crate::sys_common::net::{getsockopt, setsockopt, sockaddr_to_addr};
 use crate::sys_common::{AsInner, FromInner, IntoInner};
 use crate::time::{Duration, Instant};
 
-use libesp::{self as libc, c_int, c_void, size_t, sockaddr, socklen_t, EAI_SYSTEM, MSG_PEEK};
+use libesp::{self as libc, c_int, c_void, consts::MSG_PEEK, size_t, sockaddr, socklen_t};
+
+pub use libesp as netc;
 
 pub use crate::sys::{cvt, cvt_r};
-
-#[allow(unused_extern_crates)]
-pub extern crate libesp as netc;
 
 pub type wrlen_t = size_t;
 
@@ -27,21 +27,15 @@ pub fn cvt_gai(err: c_int) -> io::Result<()> {
         return Ok(());
     }
 
-    if err == EAI_SYSTEM {
-        return Err(io::Error::last_os_error());
-    }
-
-    Err(io::Error::new(
-        io::ErrorKind::Other,
-        &format!("failed to lookup address information: {}", err),
-    ))
+    // TODO: Pass on os_error
+    Err(io::Error::new(io::ErrorKind::Other, "failed to lookup address information"))
 }
 
 impl Socket {
     pub fn new(addr: &SocketAddr, ty: c_int) -> io::Result<Socket> {
         let fam = match *addr {
-            SocketAddr::V4(..) => libc::AF_INET,
-            SocketAddr::V6(..) => libc::AF_INET6,
+            SocketAddr::V4(..) => libc::consts::AF_INET,
+            SocketAddr::V6(..) => libc::consts::AF_INET6,
         };
         Socket::new_raw(fam, ty)
     }
@@ -75,11 +69,12 @@ impl Socket {
             Ok(_) => return Ok(()),
             // there's no ErrorKind for EINPROGRESS :(
             // TODO: @val easy fix here
-            Err(ref e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {}
+            Err(ref e) if e.raw_os_error() == Some(libc::errno::EINPROGRESS) => {}
             Err(e) => return Err(e),
         }
 
-        let mut pollfd = libc::pollfd { fd: self.0.raw(), events: libc::POLLOUT, revents: 0 };
+        let mut pollfd =
+            libc::pollfd { fd: self.0.raw(), events: libc::errno::POLLOUT, revents: 0 };
 
         if timeout.as_secs() == 0 && timeout.subsec_nanos() == 0 {
             return Err(io::Error::new(
@@ -118,7 +113,7 @@ impl Socket {
                 _ => {
                     // linux returns POLLOUT|POLLERR|POLLHUP for refused connections (!), so look
                     // for POLLHUP rather than read readiness
-                    if pollfd.revents & libc::POLLHUP != 0 {
+                    if pollfd.revents & libc::errno::POLLHUP != 0 {
                         let e = self.take_error()?.unwrap_or_else(|| {
                             io::Error::new(io::ErrorKind::Other, "no error set after POLLHUP")
                         });
@@ -145,7 +140,12 @@ impl Socket {
 
     fn recv_with_flags(&self, buf: &mut [u8], flags: c_int) -> io::Result<usize> {
         let ret = cvt(unsafe {
-            libc::lwip_recv(self.0.raw(), buf.as_mut_ptr() as *mut c_void, buf.len(), flags)
+            libc::lwip_recv(
+                self.0.raw(),
+                buf.as_mut_ptr() as *mut c_void,
+                buf.len().try_into().unwrap(),
+                flags,
+            )
         })?;
         Ok(ret as usize)
     }
@@ -174,7 +174,7 @@ impl Socket {
             libc::lwip_recvfrom(
                 self.0.raw(),
                 buf.as_mut_ptr() as *mut c_void,
-                buf.len(),
+                buf.len().try_into().unwrap(),
                 flags,
                 &mut storage as *mut _ as *mut _,
                 &mut addrlen,
@@ -225,11 +225,11 @@ impl Socket {
             }
             None => libc::timeval { tv_sec: 0, tv_usec: 0 },
         };
-        setsockopt(self, libc::SOL_SOCKET, kind, timeout)
+        setsockopt(self, libc::consts::SOL_SOCKET, kind, timeout)
     }
 
     pub fn timeout(&self, kind: libc::c_int) -> io::Result<Option<Duration>> {
-        let raw: libc::timeval = getsockopt(self, libc::SOL_SOCKET, kind)?;
+        let raw: libc::timeval = getsockopt(self, libc::consts::SOL_SOCKET, kind)?;
         if raw.tv_sec == 0 && raw.tv_usec == 0 {
             Ok(None)
         } else {
@@ -245,28 +245,30 @@ impl Socket {
             Shutdown::Read => libc::SHUT_RD,
             Shutdown::Both => libc::SHUT_RDWR,
         };
-        cvt(unsafe { libc::lwip_shutdown(self.0.raw(), how) })?;
+        cvt(unsafe { libc::lwip_shutdown(self.0.raw(), how.try_into().unwrap()) })?;
         Ok(())
     }
 
     pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
-        setsockopt(self, libc::IPPROTO_TCP, libc::TCP_NODELAY, nodelay as c_int)
+        setsockopt(self, libc::consts::IPPROTO_TCP, libc::consts::TCP_NODELAY, nodelay as c_int)
     }
 
     pub fn nodelay(&self) -> io::Result<bool> {
-        let raw: c_int = getsockopt(self, libc::IPPROTO_TCP, libc::TCP_NODELAY)?;
+        let raw: c_int = getsockopt(self, libc::consts::IPPROTO_TCP, libc::consts::TCP_NODELAY)?;
         Ok(raw != 0)
     }
 
     pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
         // NOTE: FIONBIO isnt available with lwip so we are gonna use fcntl instead
         let mut nonblocking = nonblocking as libc::c_int;
-        cvt(unsafe { libc::lwip_fcntl(*self.as_inner(), libc::F_SETFL, libc::O_NONBLOCK) })
-            .map(drop)
+        cvt(unsafe {
+            libc::lwip_fcntl(*self.as_inner(), libc::consts::F_SETFL, libc::consts::O_NONBLOCK)
+        })
+        .map(drop)
     }
 
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
-        let raw: c_int = getsockopt(self, libc::SOL_SOCKET, libc::SO_ERROR)?;
+        let raw: c_int = getsockopt(self, libc::consts::SOL_SOCKET, libc::errno::SO_ERROR)?;
         if raw == 0 { Ok(None) } else { Ok(Some(io::Error::from_raw_os_error(raw as i32))) }
     }
 }

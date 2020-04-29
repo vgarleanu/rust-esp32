@@ -85,41 +85,41 @@ impl IntoRawFd for fs::File {
 #[stable(feature = "asraw_stdio", since = "1.21.0")]
 impl AsRawFd for io::Stdin {
     fn as_raw_fd(&self) -> RawFd {
-        libc::STDIN_FILENO
+        libc::consts::STDIN_FILENO
     }
 }
 
 #[stable(feature = "asraw_stdio", since = "1.21.0")]
 impl AsRawFd for io::Stdout {
     fn as_raw_fd(&self) -> RawFd {
-        libc::STDOUT_FILENO
+        libc::consts::STDOUT_FILENO
     }
 }
 
 #[stable(feature = "asraw_stdio", since = "1.21.0")]
 impl AsRawFd for io::Stderr {
     fn as_raw_fd(&self) -> RawFd {
-        libc::STDERR_FILENO
+        libc::consts::STDERR_FILENO
     }
 }
 
 #[stable(feature = "asraw_stdio_locks", since = "1.35.0")]
 impl<'a> AsRawFd for io::StdinLock<'a> {
     fn as_raw_fd(&self) -> RawFd {
-        libc::STDIN_FILENO
+        libc::consts::STDIN_FILENO
     }
 }
 
 #[stable(feature = "asraw_stdio_locks", since = "1.35.0")]
 impl<'a> AsRawFd for io::StdoutLock<'a> {
     fn as_raw_fd(&self) -> RawFd {
-        libc::STDOUT_FILENO
+        libc::consts::STDOUT_FILENO
     }
 }
 
 #[stable(feature = "asraw_stdio_locks", since = "1.35.0")]
 impl<'a> AsRawFd for io::StderrLock<'a> {
     fn as_raw_fd(&self) -> RawFd {
-        libc::STDERR_FILENO
+        libc::consts::STDERR_FILENO
     }
 }

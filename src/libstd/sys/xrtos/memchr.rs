@@ -1,6 +1,7 @@
 // Original implementation taken from rust-memchr.
 // Copyright 2015 Andrew Gallant, bluss and Nicolas Koch
 
+use crate::convert::TryInto;
 use libesp as libc;
 
 pub fn memchr(needle: u8, haystack: &[u8]) -> Option<usize> {
@@ -8,7 +9,7 @@ pub fn memchr(needle: u8, haystack: &[u8]) -> Option<usize> {
         libc::memchr(
             haystack.as_ptr() as *const libc::c_void,
             needle as libc::c_int,
-            haystack.len(),
+            haystack.len().try_into().unwrap(),
         )
     };
     if p.is_null() { None } else { Some(p as usize - (haystack.as_ptr() as usize)) }

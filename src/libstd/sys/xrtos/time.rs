@@ -256,6 +256,7 @@ mod inner {
     use crate::fmt;
     use crate::sys::cvt;
     use crate::time::Duration;
+    use libesp as libc;
 
     use super::Timespec;
 
@@ -310,7 +311,8 @@ mod inner {
 
     impl SystemTime {
         pub fn now() -> SystemTime {
-            SystemTime { t: now(libc::CLOCK_REALTIME) }
+            // FIXME: @val CLOCK_REALTIME isnt defined in esp-idf
+            SystemTime { t: now(libc::CLOCK_MONOTONIC) }
         }
 
         pub fn sub_time(&self, other: &SystemTime) -> Result<Duration, Duration> {
@@ -341,12 +343,7 @@ mod inner {
         }
     }
 
-    #[cfg(not(target_os = "dragonfly"))]
-    pub type clock_t = libc::c_int;
-    #[cfg(target_os = "dragonfly")]
-    pub type clock_t = libc::c_ulong;
-
-    fn now(clock: clock_t) -> Timespec {
+    fn now(clock: libc::clock_t) -> Timespec {
         let mut t = Timespec { t: libc::timespec { tv_sec: 0, tv_nsec: 0 } };
         cvt(unsafe { libc::clock_gettime(clock, &mut t.t) }).unwrap();
         t

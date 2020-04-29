@@ -1,5 +1,5 @@
 use crate::cell::UnsafeCell;
-use crate::mem::MaybeUninit;
+use crate::mem::{self, MaybeUninit};
 
 use libesp as libc;
 
@@ -22,6 +22,7 @@ impl Mutex {
         // initialization of potentially opaque OS data before it landed.
         // Be very careful using this newly constructed `Mutex`, reentrant
         // locking is undefined behavior until `init` is called!
+        // NOTE: esp-idf has no default mutex, will mem::zeroed cause UB?
         Mutex { inner: UnsafeCell::new(libc::PTHREAD_MUTEX_INITIALIZER) }
     }
     #[inline]
@@ -47,7 +48,8 @@ impl Mutex {
         let mut attr = MaybeUninit::<libc::pthread_mutexattr_t>::uninit();
         let r = libc::pthread_mutexattr_init(attr.as_mut_ptr());
         debug_assert_eq!(r, 0);
-        let r = libc::pthread_mutexattr_settype(attr.as_mut_ptr(), libc::PTHREAD_MUTEX_NORMAL);
+        let r =
+            libc::pthread_mutexattr_settype(attr.as_mut_ptr(), libc::consts::PTHREAD_MUTEX_NORMAL);
         debug_assert_eq!(r, 0);
         let r = libc::pthread_mutex_init(self.inner.get(), attr.as_ptr());
         debug_assert_eq!(r, 0);
@@ -69,20 +71,9 @@ impl Mutex {
         libc::pthread_mutex_trylock(self.inner.get()) == 0
     }
     #[inline]
-    #[cfg(not(target_os = "dragonfly"))]
     pub unsafe fn destroy(&self) {
         let r = libc::pthread_mutex_destroy(self.inner.get());
         debug_assert_eq!(r, 0);
-    }
-    #[inline]
-    #[cfg(target_os = "dragonfly")]
-    pub unsafe fn destroy(&self) {
-        let r = libc::pthread_mutex_destroy(self.inner.get());
-        // On DragonFly pthread_mutex_destroy() returns EINVAL if called on a
-        // mutex that was just initialized with libc::PTHREAD_MUTEX_INITIALIZER.
-        // Once it is used (locked/unlocked) or pthread_mutex_init() is called,
-        // this behaviour no longer occurs.
-        debug_assert!(r == 0 || r == libc::EINVAL);
     }
 }
 
@@ -95,6 +86,8 @@ unsafe impl Sync for ReentrantMutex {}
 
 impl ReentrantMutex {
     pub const unsafe fn uninitialized() -> ReentrantMutex {
+        // NOTE: esp-idf doesnt implement PTHREAD_MUTEX_INITIALIZER, will mem::zeroed be enough?
+        // @val
         ReentrantMutex { inner: UnsafeCell::new(libc::PTHREAD_MUTEX_INITIALIZER) }
     }
 
@@ -102,8 +95,10 @@ impl ReentrantMutex {
         let mut attr = MaybeUninit::<libc::pthread_mutexattr_t>::uninit();
         let result = libc::pthread_mutexattr_init(attr.as_mut_ptr());
         debug_assert_eq!(result, 0);
-        let result =
-            libc::pthread_mutexattr_settype(attr.as_mut_ptr(), libc::PTHREAD_MUTEX_RECURSIVE);
+        let result = libc::pthread_mutexattr_settype(
+            attr.as_mut_ptr(),
+            libc::consts::PTHREAD_MUTEX_RECURSIVE,
+        );
         debug_assert_eq!(result, 0);
         let result = libc::pthread_mutex_init(self.inner.get(), attr.as_ptr());
         debug_assert_eq!(result, 0);

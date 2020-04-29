@@ -1,6 +1,7 @@
+use crate::convert::TryInto;
 use crate::io::{self, IoSlice, IoSliceMut};
 use crate::mem::ManuallyDrop;
-use crate::sys::fd::FileDesc;
+use crate::sys::fd::FileDesc; // I hate c devs so fucking much
 
 use libesp as libc;
 
@@ -16,11 +17,11 @@ impl Stdin {
 
 impl io::Read for Stdin {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        ManuallyDrop::new(FileDesc::new(libc::STDIN_FILENO)).read(buf)
+        ManuallyDrop::new(FileDesc::new(libc::STDIN_FILENO.try_into().unwrap())).read(buf)
     }
 
     fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-        ManuallyDrop::new(FileDesc::new(libc::STDIN_FILENO)).read_vectored(bufs)
+        ManuallyDrop::new(FileDesc::new(libc::STDIN_FILENO.try_into().unwrap())).read_vectored(bufs)
     }
 }
 
@@ -32,11 +33,12 @@ impl Stdout {
 
 impl io::Write for Stdout {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        ManuallyDrop::new(FileDesc::new(libc::STDOUT_FILENO)).write(buf)
+        ManuallyDrop::new(FileDesc::new(libc::STDOUT_FILENO.try_into().unwrap())).write(buf)
     }
 
     fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
-        ManuallyDrop::new(FileDesc::new(libc::STDOUT_FILENO)).write_vectored(bufs)
+        ManuallyDrop::new(FileDesc::new(libc::STDOUT_FILENO.try_into().unwrap()))
+            .write_vectored(bufs)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -52,11 +54,12 @@ impl Stderr {
 
 impl io::Write for Stderr {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        ManuallyDrop::new(FileDesc::new(libc::STDERR_FILENO)).write(buf)
+        ManuallyDrop::new(FileDesc::new(libc::STDERR_FILENO.try_into().unwrap())).write(buf)
     }
 
     fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
-        ManuallyDrop::new(FileDesc::new(libc::STDERR_FILENO)).write_vectored(bufs)
+        ManuallyDrop::new(FileDesc::new(libc::STDERR_FILENO.try_into().unwrap()))
+            .write_vectored(bufs)
     }
 
     fn flush(&mut self) -> io::Result<()> {

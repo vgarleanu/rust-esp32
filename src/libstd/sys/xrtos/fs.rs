@@ -1,5 +1,6 @@
 use crate::os::unix::prelude::*;
 
+use crate::convert::TryInto;
 use crate::ffi::{CStr, CString, OsStr, OsString};
 use crate::fmt;
 use crate::io::{self, Error, ErrorKind, IoSlice, IoSliceMut, SeekFrom};
@@ -10,41 +11,16 @@ use crate::sync::Arc;
 use crate::sys::fd::FileDesc;
 use crate::sys::time::SystemTime;
 use crate::sys::{cvt, cvt_r};
-use crate::sys_common::{AsInner, FromInner};
+use crate::sys_common::AsInner;
+use crate::sys_common::FromInner;
 
 use libesp::{self as libc, c_int, mode_t};
 
-#[cfg(any(target_os = "linux", target_os = "emscripten", target_os = "android"))]
-use libc::dirfd;
-#[cfg(any(target_os = "linux", target_os = "emscripten"))]
-use libc::fstatat64;
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "emscripten",
-    target_os = "solaris",
-    target_os = "l4re",
-    target_os = "fuchsia",
-    target_os = "redox"
-)))]
 use libc::readdir_r as readdir64_r;
-#[cfg(target_os = "android")]
+// NOTE: Symbolic links dont exist on esp-idf so we just link stat to lstat64
 use libc::{
-    dirent as dirent64, fstat as fstat64, fstatat as fstatat64, lseek64, lstat as lstat64,
-    open as open64, stat as stat64,
-};
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "emscripten",
-    target_os = "l4re",
-    target_os = "android"
-)))]
-use libc::{
-    dirent as dirent64, fstat as fstat64, ftruncate as ftruncate64, lseek as lseek64,
-    lstat as lstat64, off_t as off64_t, open as open64, stat as stat64,
-};
-#[cfg(any(target_os = "linux", target_os = "emscripten", target_os = "l4re"))]
-use libc::{
-    dirent64, fstat64, ftruncate64, lseek64, lstat64, off64_t, open64, readdir64_r, stat64,
+    dirent as dirent64, fstat as fstat64, fstatat as fstatat64, lseek as lseek64, open as open64,
+    stat as lstat64, stat as stat64,
 };
 
 pub use crate::sys_common::fs::remove_dir_all;
@@ -260,72 +236,29 @@ impl FileAttr {
     }
 }
 
-#[cfg(target_os = "netbsd")]
 impl FileAttr {
     pub fn modified(&self) -> io::Result<SystemTime> {
         Ok(SystemTime::from(libc::timespec {
             tv_sec: self.stat.st_mtime as libc::time_t,
-            tv_nsec: self.stat.st_mtimensec as libc::c_long,
+            tv_nsec: 0,
         }))
     }
 
+    // NOTE: esp-idf doenst track files up to nsecs, so just put 0 here
     pub fn accessed(&self) -> io::Result<SystemTime> {
         Ok(SystemTime::from(libc::timespec {
             tv_sec: self.stat.st_atime as libc::time_t,
-            tv_nsec: self.stat.st_atimensec as libc::c_long,
+            tv_nsec: 0,
         }))
     }
 
-    pub fn created(&self) -> io::Result<SystemTime> {
-        Ok(SystemTime::from(libc::timespec {
-            tv_sec: self.stat.st_birthtime as libc::time_t,
-            tv_nsec: self.stat.st_birthtimensec as libc::c_long,
-        }))
-    }
-}
-
-#[cfg(not(target_os = "netbsd"))]
-impl FileAttr {
-    pub fn modified(&self) -> io::Result<SystemTime> {
-        Ok(SystemTime::from(libc::timespec {
-            tv_sec: self.stat.st_mtime as libc::time_t,
-            tv_nsec: self.stat.st_mtime_nsec as _,
-        }))
-    }
-
-    pub fn accessed(&self) -> io::Result<SystemTime> {
-        Ok(SystemTime::from(libc::timespec {
-            tv_sec: self.stat.st_atime as libc::time_t,
-            tv_nsec: self.stat.st_atime_nsec as _,
-        }))
-    }
-
-    #[cfg(any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "macos",
-        target_os = "ios"
-    ))]
-    pub fn created(&self) -> io::Result<SystemTime> {
-        Ok(SystemTime::from(libc::timespec {
-            tv_sec: self.stat.st_birthtime as libc::time_t,
-            tv_nsec: self.stat.st_birthtime_nsec as libc::c_long,
-        }))
-    }
-
-    #[cfg(not(any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "macos",
-        target_os = "ios"
-    )))]
     pub fn created(&self) -> io::Result<SystemTime> {
         cfg_has_statx! {
             if let Some(ext) = &self.statx_extra_fields {
                 return if (ext.stx_mask & libc::STATX_BTIME) != 0 {
                     Ok(SystemTime::from(libc::timespec {
                         tv_sec: ext.stx_btime.tv_sec as libc::time_t,
-                        tv_nsec: ext.stx_btime.tv_nsec as _,
+                        tv_nsec: 0,
                     }))
                 } else {
                     Err(io::Error::new(
@@ -488,107 +421,24 @@ impl DirEntry {
         OsStr::from_bytes(self.name_bytes()).to_os_string()
     }
 
-    #[cfg(any(target_os = "linux", target_os = "emscripten", target_os = "android"))]
-    pub fn metadata(&self) -> io::Result<FileAttr> {
-        let fd = cvt(unsafe { dirfd(self.dir.inner.dirp.0) })?;
-        let name = self.entry.d_name.as_ptr();
-
-        cfg_has_statx! {
-            if let Some(ret) = unsafe { try_statx(
-                fd,
-                name,
-                libc::AT_SYMLINK_NOFOLLOW | libc::AT_STATX_SYNC_AS_STAT,
-                libc::STATX_ALL,
-            ) } {
-                return ret;
-            }
-        }
-
-        let mut stat: stat64 = unsafe { mem::zeroed() };
-        cvt(unsafe { fstatat64(fd, name, &mut stat, libc::AT_SYMLINK_NOFOLLOW) })?;
-        Ok(FileAttr::from_stat64(stat))
-    }
-
-    #[cfg(not(any(target_os = "linux", target_os = "emscripten", target_os = "android")))]
     pub fn metadata(&self) -> io::Result<FileAttr> {
         lstat(&self.path())
     }
 
-    #[cfg(any(target_os = "solaris", target_os = "haiku"))]
-    pub fn file_type(&self) -> io::Result<FileType> {
-        lstat(&self.path()).map(|m| m.file_type())
-    }
-
-    #[cfg(not(any(target_os = "solaris", target_os = "haiku")))]
+    // NOTE: Basically the only files supported on esp-idf is regular files and directories
     pub fn file_type(&self) -> io::Result<FileType> {
         match self.entry.d_type {
-            libc::DT_CHR => Ok(FileType { mode: libc::S_IFCHR }),
-            libc::DT_FIFO => Ok(FileType { mode: libc::S_IFIFO }),
-            libc::DT_LNK => Ok(FileType { mode: libc::S_IFLNK }),
-            libc::DT_REG => Ok(FileType { mode: libc::S_IFREG }),
-            libc::DT_SOCK => Ok(FileType { mode: libc::S_IFSOCK }),
-            libc::DT_DIR => Ok(FileType { mode: libc::S_IFDIR }),
-            libc::DT_BLK => Ok(FileType { mode: libc::S_IFBLK }),
+            libc::types::DT_REG => Ok(FileType { mode: libc::S_IFREG }),
+            libc::types::DT_DIR => Ok(FileType { mode: libc::S_IFDIR }),
             _ => lstat(&self.path()).map(|m| m.file_type()),
         }
     }
-
-    #[cfg(any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "linux",
-        target_os = "emscripten",
-        target_os = "android",
-        target_os = "solaris",
-        target_os = "haiku",
-        target_os = "l4re",
-        target_os = "fuchsia",
-        target_os = "redox"
-    ))]
     pub fn ino(&self) -> u64 {
         self.entry.d_ino as u64
     }
 
-    #[cfg(any(
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd",
-        target_os = "dragonfly"
-    ))]
-    pub fn ino(&self) -> u64 {
-        self.entry.d_fileno as u64
-    }
-
-    #[cfg(any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "freebsd",
-        target_os = "dragonfly"
-    ))]
-    fn name_bytes(&self) -> &[u8] {
-        use crate::slice;
-        unsafe {
-            slice::from_raw_parts(
-                self.entry.d_name.as_ptr() as *const u8,
-                self.entry.d_namlen as usize,
-            )
-        }
-    }
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "emscripten",
-        target_os = "l4re",
-        target_os = "haiku"
-    ))]
     fn name_bytes(&self) -> &[u8] {
         unsafe { CStr::from_ptr(self.entry.d_name.as_ptr()).to_bytes() }
-    }
-    #[cfg(any(target_os = "solaris", target_os = "fuchsia", target_os = "redox"))]
-    fn name_bytes(&self) -> &[u8] {
-        &*self.name
     }
 }
 
@@ -636,12 +486,12 @@ impl OpenOptions {
 
     fn get_access_mode(&self) -> io::Result<c_int> {
         match (self.read, self.write, self.append) {
-            (true, false, false) => Ok(libc::O_RDONLY),
-            (false, true, false) => Ok(libc::O_WRONLY),
-            (true, true, false) => Ok(libc::O_RDWR),
-            (false, _, true) => Ok(libc::O_WRONLY | libc::O_APPEND),
-            (true, _, true) => Ok(libc::O_RDWR | libc::O_APPEND),
-            (false, false, false) => Err(Error::from_raw_os_error(libc::EINVAL)),
+            (true, false, false) => Ok(libc::consts::O_RDONLY),
+            (false, true, false) => Ok(libc::consts::O_WRONLY),
+            (true, true, false) => Ok(libc::consts::O_RDWR),
+            (false, _, true) => Ok(libc::consts::O_WRONLY | libc::consts::O_APPEND),
+            (true, _, true) => Ok(libc::consts::O_RDWR | libc::consts::O_APPEND),
+            (false, false, false) => Err(Error::from_raw_os_error(libc::errno::EINVAL)),
         }
     }
 
@@ -650,22 +500,22 @@ impl OpenOptions {
             (true, false) => {}
             (false, false) => {
                 if self.truncate || self.create || self.create_new {
-                    return Err(Error::from_raw_os_error(libc::EINVAL));
+                    return Err(Error::from_raw_os_error(libc::errno::EINVAL));
                 }
             }
             (_, true) => {
                 if self.truncate && !self.create_new {
-                    return Err(Error::from_raw_os_error(libc::EINVAL));
+                    return Err(Error::from_raw_os_error(libc::errno::EINVAL));
                 }
             }
         }
 
         Ok(match (self.create, self.truncate, self.create_new) {
             (false, false, false) => 0,
-            (true, false, false) => libc::O_CREAT,
-            (false, true, false) => libc::O_TRUNC,
-            (true, true, false) => libc::O_CREAT | libc::O_TRUNC,
-            (_, _, true) => libc::O_CREAT | libc::O_EXCL,
+            (true, false, false) => libc::consts::O_CREAT,
+            (false, true, false) => libc::consts::O_TRUNC,
+            (true, true, false) => libc::consts::O_CREAT | libc::consts::O_TRUNC,
+            (_, _, true) => libc::consts::O_CREAT | libc::consts::O_EXCL,
         })
     }
 }
@@ -677,60 +527,12 @@ impl File {
     }
 
     pub fn open_c(path: &CStr, opts: &OpenOptions) -> io::Result<File> {
-        let flags = libc::O_CLOEXEC
-            | opts.get_access_mode()?
-            | opts.get_creation_mode()?
-            | (opts.custom_flags as c_int & !libc::O_ACCMODE);
+        let flags =
+            opts.get_access_mode()? | opts.get_creation_mode()? | (opts.custom_flags as c_int);
         let fd = cvt_r(|| unsafe { open64(path.as_ptr(), flags, opts.mode as c_int) })?;
         let fd = FileDesc::new(fd);
+        fd.set_cloexec()?;
 
-        // Currently the standard library supports Linux 2.6.18 which did not
-        // have the O_CLOEXEC flag (passed above). If we're running on an older
-        // Linux kernel then the flag is just ignored by the OS. After we open
-        // the first file, we check whether it has CLOEXEC set. If it doesn't,
-        // we will explicitly ask for a CLOEXEC fd for every further file we
-        // open, if it does, we will skip that step.
-        //
-        // The CLOEXEC flag, however, is supported on versions of macOS/BSD/etc
-        // that we support, so we only do this on Linux currently.
-        #[cfg(target_os = "linux")]
-        fn ensure_cloexec(fd: &FileDesc) -> io::Result<()> {
-            use crate::sync::atomic::{AtomicUsize, Ordering};
-
-            const OPEN_CLOEXEC_UNKNOWN: usize = 0;
-            const OPEN_CLOEXEC_SUPPORTED: usize = 1;
-            const OPEN_CLOEXEC_NOTSUPPORTED: usize = 2;
-            static OPEN_CLOEXEC: AtomicUsize = AtomicUsize::new(OPEN_CLOEXEC_UNKNOWN);
-
-            let need_to_set;
-            match OPEN_CLOEXEC.load(Ordering::Relaxed) {
-                OPEN_CLOEXEC_UNKNOWN => {
-                    need_to_set = !fd.get_cloexec()?;
-                    OPEN_CLOEXEC.store(
-                        if need_to_set {
-                            OPEN_CLOEXEC_NOTSUPPORTED
-                        } else {
-                            OPEN_CLOEXEC_SUPPORTED
-                        },
-                        Ordering::Relaxed,
-                    );
-                }
-                OPEN_CLOEXEC_SUPPORTED => need_to_set = false,
-                OPEN_CLOEXEC_NOTSUPPORTED => need_to_set = true,
-                _ => unreachable!(),
-            }
-            if need_to_set {
-                fd.set_cloexec()?;
-            }
-            Ok(())
-        }
-
-        #[cfg(not(target_os = "linux"))]
-        fn ensure_cloexec(_: &FileDesc) -> io::Result<()> {
-            Ok(())
-        }
-
-        ensure_cloexec(&fd)?;
         Ok(File(fd))
     }
 
@@ -786,16 +588,7 @@ impl File {
     }
 
     pub fn truncate(&self, size: u64) -> io::Result<()> {
-        #[cfg(target_os = "android")]
-        return crate::sys::android::ftruncate64(self.0.raw(), size);
-
-        #[cfg(not(target_os = "android"))]
-        {
-            use crate::convert::TryInto;
-            let size: off64_t =
-                size.try_into().map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-            cvt_r(|| unsafe { ftruncate64(self.0.raw(), size) }).map(drop)
-        }
+        unimplemented!("ftruncate isnt available on xtensa");
     }
 
     pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
@@ -830,11 +623,13 @@ impl File {
         let (whence, pos) = match pos {
             // Casting to `i64` is fine, too large values will end up as
             // negative which will cause an error in `lseek64`.
-            SeekFrom::Start(off) => (libc::SEEK_SET, off as i64),
-            SeekFrom::End(off) => (libc::SEEK_END, off),
-            SeekFrom::Current(off) => (libc::SEEK_CUR, off),
+            //
+            // FIXME: the esp32 lseek doenst take an i64 tho, will use as i32 for now
+            SeekFrom::Start(off) => (libc::consts::SEEK_SET, off as i64),
+            SeekFrom::End(off) => (libc::consts::SEEK_END, off),
+            SeekFrom::Current(off) => (libc::consts::SEEK_CUR, off),
         };
-        let n = cvt(unsafe { lseek64(self.0.raw(), pos, whence) })?;
+        let n = cvt(unsafe { lseek64(self.0.raw(), pos.try_into().unwrap(), whence) })?;
         Ok(n as u64)
     }
 
@@ -994,8 +789,9 @@ pub fn readlink(p: &Path) -> io::Result<PathBuf> {
     let mut buf = Vec::with_capacity(256);
 
     loop {
-        let buf_read =
-            cvt(unsafe { libc::readlink(p, buf.as_mut_ptr() as *mut _, buf.capacity()) })? as usize;
+        let buf_read = cvt(unsafe {
+            libc::readlink(p, buf.as_mut_ptr() as *mut _, buf.capacity().try_into().unwrap())
+        })? as usize;
 
         unsafe {
             buf.set_len(buf_read);

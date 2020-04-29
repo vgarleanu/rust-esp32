@@ -1,22 +1,23 @@
 #![stable(feature = "unix_socket", since = "1.10.0")]
 
 use crate::ascii;
+use crate::convert::TryInto;
 use crate::ffi::OsStr;
 use crate::fmt;
 use crate::io::{self, Initializer, IoSlice, IoSliceMut};
 use crate::mem;
 use crate::net::{self, Shutdown};
-use crate::os::unix::ffi::OsStrExt;
-use crate::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use crate::path::Path;
 use crate::sys::ext::io::*;
 use crate::sys::net::Socket;
 use crate::sys::{self, cvt};
-use crate::sys_common::{self, AsInner, FromInner, IntoInner};
+use crate::sys_common;
+use crate::sys_common::os_str_bytes::OsStrExt;
+use crate::sys_common::{AsInner, FromInner, IntoInner};
 use crate::time::Duration;
 use libesp as libc;
 
-use libc::MSG_NOSIGNAL;
+use libc::consts::MSG_NOSIGNAL;
 
 fn sun_path_offset(addr: &libc::sockaddr_un) -> usize {
     // Work with an actual instance of the type since using a null pointer is UB
@@ -27,7 +28,7 @@ fn sun_path_offset(addr: &libc::sockaddr_un) -> usize {
 
 unsafe fn sockaddr_un(path: &Path) -> io::Result<(libc::sockaddr_un, libc::socklen_t)> {
     let mut addr: libc::sockaddr_un = mem::zeroed();
-    addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    addr.sun_family = libc::AF_UNIX as i16;
 
     let bytes = path.as_os_str().as_bytes();
 
@@ -105,7 +106,7 @@ impl SocketAddr {
             // When there is a datagram from unnamed unix socket
             // linux returns zero bytes of address
             len = sun_path_offset(&addr) as libc::socklen_t; // i.e., zero-length address
-        } else if addr.sun_family != libc::AF_UNIX as libc::sa_family_t {
+        } else if addr.sun_family != libc::AF_UNIX as i16 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "file descriptor did not correspond to a Unix socket",
@@ -282,7 +283,7 @@ impl UnixStream {
         // lwip supports them.
         fn inner(path: &Path) -> io::Result<UnixStream> {
             unsafe {
-                let inner = Socket::new_raw(libc::AF_UNIX, libc::SOCK_STREAM)?;
+                let inner = Socket::new_raw(libc::consts::AF_UNIX, libc::consts::SOCK_STREAM)?;
                 let (addr, len) = sockaddr_un(path)?;
 
                 cvt(libc::lwip_connect(*inner.as_inner(), &addr as *const _ as *const _, len))?;
@@ -311,7 +312,7 @@ impl UnixStream {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn pair() -> io::Result<(UnixStream, UnixStream)> {
-        let (i1, i2) = Socket::new_pair(libc::AF_UNIX, libc::SOCK_STREAM)?;
+        let (i1, i2) = Socket::new_pair(libc::consts::AF_UNIX, libc::consts::SOCK_STREAM)?;
         Ok((UnixStream(i1), UnixStream(i2)))
     }
 
@@ -420,7 +421,7 @@ impl UnixStream {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        self.0.set_timeout(timeout, libc::SO_RCVTIMEO)
+        self.0.set_timeout(timeout, libc::consts::SO_RCVTIMEO)
     }
 
     /// Sets the write timeout for the socket.
@@ -466,7 +467,7 @@ impl UnixStream {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        self.0.set_timeout(timeout, libc::SO_SNDTIMEO)
+        self.0.set_timeout(timeout, libc::consts::SO_SNDTIMEO)
     }
 
     /// Returns the read timeout of this socket.
@@ -486,7 +487,7 @@ impl UnixStream {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn read_timeout(&self) -> io::Result<Option<Duration>> {
-        self.0.timeout(libc::SO_RCVTIMEO)
+        self.0.timeout(libc::consts::SO_RCVTIMEO)
     }
 
     /// Returns the write timeout of this socket.
@@ -507,7 +508,7 @@ impl UnixStream {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
-        self.0.timeout(libc::SO_SNDTIMEO)
+        self.0.timeout(libc::consts::SO_SNDTIMEO)
     }
 
     /// Moves the socket into or out of nonblocking mode.
@@ -790,7 +791,7 @@ impl UnixListener {
     pub fn bind<P: AsRef<Path>>(path: P) -> io::Result<UnixListener> {
         fn inner(path: &Path) -> io::Result<UnixListener> {
             unsafe {
-                let inner = Socket::new_raw(libc::AF_UNIX, libc::SOCK_STREAM)?;
+                let inner = Socket::new_raw(libc::consts::AF_UNIX, libc::consts::SOCK_STREAM)?;
                 let (addr, len) = sockaddr_un(path)?;
 
                 cvt(libc::lwip_bind(*inner.as_inner(), &addr as *const _ as *const _, len as _))?;
@@ -1135,7 +1136,7 @@ impl UnixDatagram {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn unbound() -> io::Result<UnixDatagram> {
-        let inner = Socket::new_raw(libc::AF_UNIX, libc::SOCK_DGRAM)?;
+        let inner = Socket::new_raw(libc::consts::AF_UNIX, libc::consts::SOCK_DGRAM)?;
         Ok(UnixDatagram(inner))
     }
 
@@ -1158,7 +1159,7 @@ impl UnixDatagram {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn pair() -> io::Result<(UnixDatagram, UnixDatagram)> {
-        let (i1, i2) = Socket::new_pair(libc::AF_UNIX, libc::SOCK_DGRAM)?;
+        let (i1, i2) = Socket::new_pair(libc::consts::AF_UNIX, libc::consts::SOCK_DGRAM)?;
         Ok((UnixDatagram(i1), UnixDatagram(i2)))
     }
 
@@ -1295,7 +1296,7 @@ impl UnixDatagram {
             count = libc::lwip_recvfrom(
                 *self.0.as_inner(),
                 buf.as_mut_ptr() as *mut _,
-                buf.len(),
+                buf.len().try_into().unwrap(),
                 0,
                 addr,
                 len,
@@ -1357,7 +1358,7 @@ impl UnixDatagram {
                 let count = cvt(libc::lwip_sendto(
                     *d.0.as_inner(),
                     buf.as_ptr() as *const _,
-                    buf.len(),
+                    buf.len().try_into().unwrap(),
                     MSG_NOSIGNAL,
                     &addr as *const _ as *const _,
                     len,
@@ -1436,7 +1437,7 @@ impl UnixDatagram {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        self.0.set_timeout(timeout, libc::SO_RCVTIMEO)
+        self.0.set_timeout(timeout, libc::consts::SO_RCVTIMEO)
     }
 
     /// Sets the write timeout for the socket.
@@ -1482,7 +1483,7 @@ impl UnixDatagram {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        self.0.set_timeout(timeout, libc::SO_SNDTIMEO)
+        self.0.set_timeout(timeout, libc::consts::SO_SNDTIMEO)
     }
 
     /// Returns the read timeout of this socket.
@@ -1503,7 +1504,7 @@ impl UnixDatagram {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn read_timeout(&self) -> io::Result<Option<Duration>> {
-        self.0.timeout(libc::SO_RCVTIMEO)
+        self.0.timeout(libc::consts::SO_RCVTIMEO)
     }
 
     /// Returns the write timeout of this socket.
@@ -1524,7 +1525,7 @@ impl UnixDatagram {
     /// ```
     #[stable(feature = "unix_socket", since = "1.10.0")]
     pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
-        self.0.timeout(libc::SO_SNDTIMEO)
+        self.0.timeout(libc::consts::SO_SNDTIMEO)
     }
 
     /// Moves the socket into or out of nonblocking mode.

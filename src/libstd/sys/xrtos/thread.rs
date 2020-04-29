@@ -1,4 +1,5 @@
 use crate::cmp;
+use crate::convert::TryInto;
 use crate::ffi::CStr;
 use crate::io;
 use crate::mem;
@@ -7,7 +8,7 @@ use crate::sys::{os, stack_overflow};
 use crate::time::Duration;
 use libesp as libc;
 
-pub const DEFAULT_MIN_STACK_SIZE: usize = 2 * 1024 * 1024;
+pub const DEFAULT_MIN_STACK_SIZE: usize = 2 * 1024;
 
 pub struct Thread {
     id: libc::pthread_t,
@@ -18,22 +19,11 @@ pub struct Thread {
 unsafe impl Send for Thread {}
 unsafe impl Sync for Thread {}
 
-// The pthread_attr_setstacksize symbol doesn't exist in the emscripten libc,
-// so we have to not link to it to satisfy emcc's ERROR_ON_UNDEFINED_SYMBOLS.
-#[cfg(not(target_os = "emscripten"))]
 unsafe fn pthread_attr_setstacksize(
     attr: *mut libc::pthread_attr_t,
     stack_size: libc::size_t,
 ) -> libc::c_int {
     libc::pthread_attr_setstacksize(attr, stack_size)
-}
-
-#[cfg(target_os = "emscripten")]
-unsafe fn pthread_attr_setstacksize(
-    _attr: *mut libc::pthread_attr_t,
-    _stack_size: libc::size_t,
-) -> libc::c_int {
-    panic!()
 }
 
 impl Thread {
@@ -46,22 +36,20 @@ impl Thread {
 
         let stack_size = cmp::max(stack, min_stack_size(&attr));
 
-        match pthread_attr_setstacksize(&mut attr, stack_size) {
+        match pthread_attr_setstacksize(&mut attr, stack_size.try_into().unwrap()) {
             0 => {}
             n => {
-                assert_eq!(n, libc::EINVAL);
-                // EINVAL means |stack_size| is either too small or not a
-                // multiple of the system page size.  Because it's definitely
-                // >= PTHREAD_STACK_MIN, it must be an alignment issue.
-                // Round up to the nearest page and try again.
                 let page_size = os::page_size();
                 let stack_size =
                     (stack_size + page_size - 1) & (-(page_size as isize - 1) as usize - 1);
-                assert_eq!(libc::pthread_attr_setstacksize(&mut attr, stack_size), 0);
+                assert_eq!(
+                    libc::pthread_attr_setstacksize(&mut attr, stack_size.try_into().unwrap()),
+                    0
+                );
             }
         };
 
-        let ret = libc::pthread_create(&mut native, &attr, thread_start, p as *mut _);
+        let ret = libc::pthread_create(&mut native, &attr, Some(thread_start), p as *mut _);
         // Note: if the thread creation fails and this assert fails, then p will
         // be leaked. However, an alternative design could cause double-free
         // which is clearly worse.
@@ -76,7 +64,7 @@ impl Thread {
             Ok(Thread { id: native })
         };
 
-        extern "C" fn thread_start(main: *mut libc::c_void) -> *mut libc::c_void {
+        unsafe extern "C" fn thread_start(main: *mut core::ffi::c_void) -> *mut core::ffi::c_void {
             unsafe {
                 // Next, set up our stack overflow handler which may get triggered if we run
                 // out of stack.
@@ -93,94 +81,15 @@ impl Thread {
         debug_assert_eq!(ret, 0);
     }
 
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    pub fn set_name(name: &CStr) {
-        const PR_SET_NAME: libc::c_int = 15;
-        // pthread wrapper only appeared in glibc 2.12, so we use syscall
-        // directly.
-        unsafe {
-            libc::prctl(PR_SET_NAME, name.as_ptr() as libc::c_ulong, 0, 0, 0);
-        }
-    }
-
-    #[cfg(any(target_os = "freebsd", target_os = "dragonfly", target_os = "openbsd"))]
-    pub fn set_name(name: &CStr) {
-        unsafe {
-            libc::pthread_set_name_np(libc::pthread_self(), name.as_ptr());
-        }
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    pub fn set_name(name: &CStr) {
-        unsafe {
-            libc::pthread_setname_np(name.as_ptr());
-        }
-    }
-
-    #[cfg(target_os = "netbsd")]
-    pub fn set_name(name: &CStr) {
-        use crate::ffi::CString;
-        let cname = CString::new(&b"%s"[..]).unwrap();
-        unsafe {
-            libc::pthread_setname_np(
-                libc::pthread_self(),
-                cname.as_ptr(),
-                name.as_ptr() as *mut libc::c_void,
-            );
-        }
-    }
-
-    #[cfg(target_os = "solaris")]
-    pub fn set_name(name: &CStr) {
-        weak! {
-            fn pthread_setname_np(
-                libc::pthread_t, *const libc::c_char
-            ) -> libc::c_int
-        }
-
-        if let Some(f) = pthread_setname_np.get() {
-            unsafe {
-                f(libc::pthread_self(), name.as_ptr());
-            }
-        }
-    }
-
-    #[cfg(any(
-        target_env = "newlib",
-        target_os = "haiku",
-        target_os = "l4re",
-        target_os = "emscripten",
-        target_os = "redox"
-    ))]
     pub fn set_name(_name: &CStr) {
-        // Newlib, Illumos, Haiku, and Emscripten have no way to set a thread name.
-    }
-    #[cfg(target_os = "fuchsia")]
-    pub fn set_name(_name: &CStr) {
-        // FIXME: determine whether Fuchsia has a way to set a thread name.
+        // NOTE: xtensa/newlib has no way to set thread name
     }
 
     pub fn sleep(dur: Duration) {
-        let mut secs = dur.as_secs();
-        let mut nsecs = dur.subsec_nanos() as _;
+        let usecs = dur.as_millis() * 1000;
 
-        // If we're awoken with a signal then the return value will be -1 and
-        // nanosleep will fill in `ts` with the remaining time.
         unsafe {
-            while secs > 0 || nsecs > 0 {
-                let mut ts = libc::timespec {
-                    tv_sec: cmp::min(libc::time_t::max_value() as u64, secs) as libc::time_t,
-                    tv_nsec: nsecs,
-                };
-                secs -= ts.tv_sec as u64;
-                if libc::nanosleep(&ts, &mut ts) == -1 {
-                    assert_eq!(os::errno(), libc::EINTR);
-                    secs += ts.tv_sec as u64;
-                    nsecs = ts.tv_nsec;
-                } else {
-                    nsecs = 0;
-                }
-            }
+            libc::usleep(usecs as libc::c_ulong);
         }
     }
 

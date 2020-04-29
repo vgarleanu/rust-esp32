@@ -1,4 +1,5 @@
 use crate::cell::UnsafeCell;
+use crate::mem;
 use crate::sys::mutex::{self, Mutex};
 use crate::time::Duration;
 use libesp as libc;
@@ -25,7 +26,8 @@ impl Condvar {
     pub const fn new() -> Condvar {
         // Might be moved and address is changing it is better to avoid
         // initialization of potentially opaque OS data before it landed
-        Condvar { inner: UnsafeCell::new(libc::PTHREAD_COND_INITIALIZER) }
+        // NOTE: will mem::zeroed() do instead of PTHREAD_COND_INITIALLIZER
+        Condvar { inner: UnsafeCell::new(libc::PTHREAD_CONDVAR_INITIALIZER) }
     }
 
     #[cfg(any(
@@ -53,8 +55,10 @@ impl Condvar {
         assert_eq!(r, 0);
         let r = libc::pthread_cond_init(self.inner.get(), attr.as_ptr());
         assert_eq!(r, 0);
-        let r = libc::pthread_condattr_destroy(attr.as_mut_ptr());
-        assert_eq!(r, 0);
+        // FIXME: Currently theres a linker error when using this, thus we disable it for now. MAY
+        // CAUSE MEM LEAK
+        // let r = libc::pthread_condattr_destroy(attr.as_mut_ptr());
+        // assert_eq!(r, 0);
     }
 
     #[inline]
@@ -99,7 +103,7 @@ impl Condvar {
             sec.map(|s| libc::timespec { tv_sec: s, tv_nsec: nsec as _ }).unwrap_or(TIMESPEC_MAX);
 
         let r = libc::pthread_cond_timedwait(self.inner.get(), mutex::raw(mutex), &timeout);
-        assert!(r == libc::ETIMEDOUT || r == 0);
+        assert!(r == libc::errno::ETIMEDOUT || r == 0);
         r == 0
     }
 

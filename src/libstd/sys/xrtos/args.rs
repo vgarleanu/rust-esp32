@@ -13,17 +13,17 @@ use libesp as libc;
 
 /// One-time global initialization.
 pub unsafe fn init(argc: isize, argv: *const *const u8) {
-    imp::init(argc, argv)
+    unimplemented!();
 }
 
 /// One-time global cleanup.
 pub unsafe fn cleanup() {
-    imp::cleanup()
+    unimplemented!();
 }
 
 /// Returns the command line arguments
 pub fn args() -> Args {
-    imp::args()
+    unimplemented!();
 }
 
 pub struct Args {
@@ -59,20 +59,6 @@ impl DoubleEndedIterator for Args {
     }
 }
 
-#[cfg(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "freebsd",
-    target_os = "dragonfly",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "solaris",
-    target_os = "emscripten",
-    target_os = "haiku",
-    target_os = "l4re",
-    target_os = "fuchsia",
-    target_os = "redox"
-))]
 mod imp {
     use super::Args;
     use crate::ffi::{CStr, OsString};
@@ -89,18 +75,12 @@ mod imp {
     static LOCK: Mutex = Mutex::new();
 
     unsafe fn really_init(argc: isize, argv: *const *const u8) {
-        let _guard = LOCK.lock();
-        ARGC = argc;
-        ARGV = argv;
+        unimplemented!();
     }
 
     #[inline(always)]
     pub unsafe fn init(_argc: isize, _argv: *const *const u8) {
-        // On Linux-GNU, we rely on `ARGV_INIT_ARRAY` below to initialize
-        // `ARGC` and `ARGV`. But in Miri that does not actually happen so we
-        // still initialize here.
-        #[cfg(any(miri, not(all(target_os = "linux", target_env = "gnu"))))]
-        really_init(_argc, _argv);
+        unimplemented!();
     }
 
     /// glibc passes argc, argv, and envp to functions in .init_array, as a non-standard extension.

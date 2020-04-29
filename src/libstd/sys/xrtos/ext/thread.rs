@@ -2,14 +2,13 @@
 
 #![stable(feature = "thread_extensions", since = "1.9.0")]
 
-#[allow(deprecated)]
-use crate::os::unix::raw::pthread_t;
 use crate::sys_common::{AsInner, IntoInner};
+#[allow(deprecated)]
 use crate::thread::JoinHandle;
 
 #[stable(feature = "thread_extensions", since = "1.9.0")]
 #[allow(deprecated)]
-pub type RawPthread = pthread_t;
+pub type RawPthread = libesp::pthread_t;
 
 /// Unix-specific extensions to [`thread::JoinHandle`].
 ///
