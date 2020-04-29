@@ -11,7 +11,8 @@ use crate::fmt;
 use crate::hash;
 use crate::io::Write;
 use crate::sys::net::netc as c;
-use crate::sys_common::{AsInner, FromInner};
+use crate::sys_common::AsInner;
+use crate::sys_common::FromInner;
 
 /// An IP address, either IPv4 or IPv6.
 ///
@@ -1047,6 +1048,7 @@ impl Ipv6Addr {
     ///
     /// let addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xc00a, 0x2ff);
     /// ```
+    #[cfg(not(target_arch = "xtensa"))]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_ipv6", since = "1.32.0")]
     pub const fn new(a: u16, b: u16, c: u16, d: u16, e: u16, f: u16, g: u16, h: u16) -> Ipv6Addr {
@@ -1070,6 +1072,47 @@ impl Ipv6Addr {
                     (h >> 8) as u8,
                     h as u8,
                 ],
+            },
+        }
+    }
+
+    /// Creates a new IPv6 address from eight 16-bit segments.
+    ///
+    /// The result will represent the IP address `a:b:c:d:e:f:g:h`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::net::Ipv6Addr;
+    ///
+    /// let addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xc00a, 0x2ff);
+    /// ```
+    #[cfg(target_arch = "xtensa")]
+    #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_const_stable(feature = "const_ipv6", since = "1.32.0")]
+    pub const fn new(a: u16, b: u16, c: u16, d: u16, e: u16, f: u16, g: u16, h: u16) -> Ipv6Addr {
+        Ipv6Addr {
+            inner: c::in6_addr {
+                un: c::in6_addr__bindgen_ty_1 {
+                    u8_addr: [
+                        (a >> 8) as u8,
+                        a as u8,
+                        (b >> 8) as u8,
+                        b as u8,
+                        (c >> 8) as u8,
+                        c as u8,
+                        (d >> 8) as u8,
+                        d as u8,
+                        (e >> 8) as u8,
+                        e as u8,
+                        (f >> 8) as u8,
+                        f as u8,
+                        (g >> 8) as u8,
+                        g as u8,
+                        (h >> 8) as u8,
+                        h as u8,
+                    ],
+                },
             },
         }
     }
@@ -1111,6 +1154,33 @@ impl Ipv6Addr {
     ///            [0, 0, 0, 0, 0, 0xffff, 0xc00a, 0x2ff]);
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[cfg(target_arch = "xtensa")]
+    pub fn segments(&self) -> [u16; 8] {
+        let arr = unsafe { &self.inner.un.u8_addr };
+        [
+            u16::from_be_bytes([arr[0], arr[1]]),
+            u16::from_be_bytes([arr[2], arr[3]]),
+            u16::from_be_bytes([arr[4], arr[5]]),
+            u16::from_be_bytes([arr[6], arr[7]]),
+            u16::from_be_bytes([arr[8], arr[9]]),
+            u16::from_be_bytes([arr[10], arr[11]]),
+            u16::from_be_bytes([arr[12], arr[13]]),
+            u16::from_be_bytes([arr[14], arr[15]]),
+        ]
+    }
+
+    /// Returns the eight 16-bit segments that make up this address.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::net::Ipv6Addr;
+    ///
+    /// assert_eq!(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xc00a, 0x2ff).segments(),
+    ///            [0, 0, 0, 0, 0, 0xffff, 0xc00a, 0x2ff]);
+    /// ```
+    #[stable(feature = "rust1", since = "1.0.0")]
+    #[cfg(not(target_arch = "xtensa"))]
     pub fn segments(&self) -> [u16; 8] {
         let arr = &self.inner.s6_addr;
         [
@@ -1519,9 +1589,25 @@ impl Ipv6Addr {
     ///            [255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     /// ```
     #[stable(feature = "ipv6_to_octets", since = "1.12.0")]
+    #[cfg(not(target_arch = "xtensa"))]
     #[rustc_const_stable(feature = "const_ipv6", since = "1.32.0")]
-    pub const fn octets(&self) -> [u8; 16] {
+    pub fn octets(&self) -> [u8; 16] {
         self.inner.s6_addr
+    }
+
+    /// Returns the sixteen eight-bit integers the IPv6 address consists of.
+    ///
+    /// ```
+    /// use std::net::Ipv6Addr;
+    ///
+    /// assert_eq!(Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 0).octets(),
+    ///            [255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    /// ```
+    #[stable(feature = "ipv6_to_octets", since = "1.12.0")]
+    #[cfg(target_arch = "xtensa")]
+    #[rustc_const_stable(feature = "const_ipv6", since = "1.32.0")]
+    pub fn octets(&self) -> [u8; 16] {
+        unsafe { self.inner.un.u8_addr }
     }
 }
 
@@ -1638,10 +1724,19 @@ impl Clone for Ipv6Addr {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 #[stable(feature = "rust1", since = "1.0.0")]
 impl PartialEq for Ipv6Addr {
     fn eq(&self, other: &Ipv6Addr) -> bool {
         self.inner.s6_addr == other.inner.s6_addr
+    }
+}
+
+#[cfg(target_arch = "xtensa")]
+#[stable(feature = "rust1", since = "1.0.0")]
+impl PartialEq for Ipv6Addr {
+    fn eq(&self, other: &Ipv6Addr) -> bool {
+        unsafe { self.inner.un.u8_addr == other.inner.un.u8_addr }
     }
 }
 
@@ -1668,10 +1763,19 @@ impl PartialEq<Ipv6Addr> for IpAddr {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl Eq for Ipv6Addr {}
 
+#[cfg(not(target_arch = "xtensa"))]
 #[stable(feature = "rust1", since = "1.0.0")]
 impl hash::Hash for Ipv6Addr {
     fn hash<H: hash::Hasher>(&self, s: &mut H) {
         self.inner.s6_addr.hash(s)
+    }
+}
+
+#[cfg(target_arch = "xtensa")]
+#[stable(feature = "rust1", since = "1.0.0")]
+impl hash::Hash for Ipv6Addr {
+    fn hash<H: hash::Hasher>(&self, s: &mut H) {
+        unsafe { self.inner.un.u8_addr.hash(s) }
     }
 }
 
@@ -1762,6 +1866,7 @@ impl From<u128> for Ipv6Addr {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 #[stable(feature = "ipv6_from_octets", since = "1.9.0")]
 impl From<[u8; 16]> for Ipv6Addr {
     /// Creates an `Ipv6Addr` from a sixteen element byte array.
@@ -1787,6 +1892,36 @@ impl From<[u8; 16]> for Ipv6Addr {
     /// ```
     fn from(octets: [u8; 16]) -> Ipv6Addr {
         let inner = c::in6_addr { s6_addr: octets };
+        Ipv6Addr::from_inner(inner)
+    }
+}
+
+#[cfg(target_arch = "xtensa")]
+#[stable(feature = "ipv6_from_octets", since = "1.9.0")]
+impl From<[u8; 16]> for Ipv6Addr {
+    /// Creates an `Ipv6Addr` from a sixteen element byte array.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::net::Ipv6Addr;
+    ///
+    /// let addr = Ipv6Addr::from([
+    ///     25u8, 24u8, 23u8, 22u8, 21u8, 20u8, 19u8, 18u8,
+    ///     17u8, 16u8, 15u8, 14u8, 13u8, 12u8, 11u8, 10u8,
+    /// ]);
+    /// assert_eq!(
+    ///     Ipv6Addr::new(
+    ///         0x1918, 0x1716,
+    ///         0x1514, 0x1312,
+    ///         0x1110, 0x0f0e,
+    ///         0x0d0c, 0x0b0a
+    ///     ),
+    ///     addr
+    /// );
+    /// ```
+    fn from(octets: [u8; 16]) -> Ipv6Addr {
+        let inner = c::in6_addr { un: c::in6_addr__bindgen_ty_1 { u8_addr: octets } };
         Ipv6Addr::from_inner(inner)
     }
 }

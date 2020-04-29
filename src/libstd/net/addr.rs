@@ -644,6 +644,7 @@ impl PartialEq for SocketAddrV4 {
             && self.inner.sin_addr.s_addr == other.inner.sin_addr.s_addr
     }
 }
+#[cfg(not(target_arch = "xtensa"))]
 #[stable(feature = "rust1", since = "1.0.0")]
 impl PartialEq for SocketAddrV6 {
     fn eq(&self, other: &SocketAddrV6) -> bool {
@@ -653,6 +654,18 @@ impl PartialEq for SocketAddrV6 {
             && self.inner.sin6_scope_id == other.inner.sin6_scope_id
     }
 }
+
+#[cfg(target_arch = "xtensa")]
+#[stable(feature = "rust1", since = "1.0.0")]
+impl PartialEq for SocketAddrV6 {
+    fn eq(&self, other: &SocketAddrV6) -> bool {
+        self.inner.sin6_port == other.inner.sin6_port
+            && unsafe { self.inner.sin6_addr.un.u32_addr == other.inner.sin6_addr.un.u32_addr }
+            && self.inner.sin6_flowinfo == other.inner.sin6_flowinfo
+            && self.inner.sin6_scope_id == other.inner.sin6_scope_id
+    }
+}
+
 #[stable(feature = "rust1", since = "1.0.0")]
 impl Eq for SocketAddrV4 {}
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -669,7 +682,7 @@ impl hash::Hash for SocketAddrV6 {
     fn hash<H: hash::Hasher>(&self, s: &mut H) {
         (
             self.inner.sin6_port,
-            &self.inner.sin6_addr.s6_addr,
+            unsafe { &self.inner.sin6_addr.un.u32_addr },
             self.inner.sin6_flowinfo,
             self.inner.sin6_scope_id,
         )
