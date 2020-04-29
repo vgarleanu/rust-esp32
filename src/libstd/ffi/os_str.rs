@@ -6,7 +6,7 @@ use crate::ops;
 use crate::rc::Rc;
 use crate::sync::Arc;
 
-use crate::sys::os_str::{Buf, Slice};
+use crate::sys_common::os_str_bytes::{Buf, Slice};
 use crate::sys_common::{AsInner, FromInner, IntoInner};
 
 /// A type that can represent owned, mutable platform-native strings, but is

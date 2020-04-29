@@ -327,24 +327,10 @@ impl CString {
         trait SpecIntoVec {
             fn into_vec(self) -> Vec<u8>;
         }
+
         impl<T: Into<Vec<u8>>> SpecIntoVec for T {
             default fn into_vec(self) -> Vec<u8> {
                 self.into()
-            }
-        }
-        // Specialization for avoiding reallocation.
-        impl SpecIntoVec for &'_ [u8] {
-            fn into_vec(self) -> Vec<u8> {
-                let mut v = Vec::with_capacity(self.len() + 1);
-                v.extend(self);
-                v
-            }
-        }
-        impl SpecIntoVec for &'_ str {
-            fn into_vec(self) -> Vec<u8> {
-                let mut v = Vec::with_capacity(self.len() + 1);
-                v.extend(self.as_bytes());
-                v
             }
         }
 
