@@ -252,6 +252,7 @@
 #![feature(const_raw_ptr_deref)]
 #![feature(container_error_extra)]
 #![feature(core_intrinsics)]
+#![feature(const_fn)]
 #![feature(custom_test_frameworks)]
 #![feature(decl_macro)]
 #![feature(doc_alias)]
@@ -452,6 +453,7 @@ pub mod thread;
 pub mod ascii;
 pub mod backtrace;
 pub mod collections;
+#[cfg(not(target_arch = "xtensa"))]
 pub mod env;
 pub mod error;
 pub mod ffi;
@@ -462,7 +464,6 @@ pub mod num;
 pub mod os;
 pub mod panic;
 pub mod path;
-pub mod process;
 pub mod sync;
 pub mod time;
 
