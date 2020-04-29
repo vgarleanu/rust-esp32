@@ -50,7 +50,8 @@ extern "C" {
             target_os = "openbsd",
             target_os = "android",
             target_os = "redox",
-            target_env = "newlib"
+            target_env = "newlib",
+            target_arch = "xtensa"
         ),
         link_name = "__errno"
     )]
