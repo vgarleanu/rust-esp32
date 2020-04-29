@@ -13,7 +13,9 @@ use crate::ffi::OsString;
 use crate::fmt;
 use crate::io::{self, Initializer, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use crate::path::{Path, PathBuf};
+use crate::sys::ext::fs::{OpenOptionsExt, PermissionsExt};
 use crate::sys::fs as fs_imp;
+use crate::sys_common::os_str_bytes::{OsStrExt, OsStringExt};
 use crate::sys_common::{AsInner, AsInnerMut, FromInner, IntoInner};
 use crate::time::SystemTime;
 
@@ -636,6 +638,7 @@ impl FromInner<fs_imp::File> for File {
         File { inner: f }
     }
 }
+
 impl IntoInner<fs_imp::File> for File {
     fn into_inner(self) -> fs_imp::File {
         self.inner
