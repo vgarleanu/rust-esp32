@@ -1,0 +1,12 @@
+[package]
+name = "libesp"
+version = "0.1.2"
+authors = ["Alexey Arbuzov <aarbuzov@termt.com>", "sapir <yasapir@gmail.com>"]
+edition = "2015"
+description = "Bindings for esp-idf (Espressif's IoT Development Framework)"
+repository = "https://github.com/sapir/esp-idf-sys"
+license = "MIT"
+
+[dependencies]
+core = { path = "../libcore" }
+compiler_builtins = { version = "0.1.16" }
